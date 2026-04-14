@@ -3,8 +3,6 @@
 // ============================================================
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -89,13 +87,13 @@ static void buildTFViews(){
 // ============================================================
 //  App state
 // ============================================================
-static std::string g_stockCode="0050";
-static std::string g_stockName="元大台灣50";
+static std::string g_stockCode="2330";
+static std::string g_stockName="台積電";
 static std::atomic<int>  g_loadProgress{0},g_loadTotal{60};
 static std::atomic<bool> g_loadDone{false},g_loadFail{false};
 
-enum AppMode{NORMAL,LOADING};
-static AppMode g_mode=NORMAL;
+enum AppMode{MENU,NORMAL,LOADING}; // MENU=啟動選股
+static AppMode g_mode=MENU; // 啟動時先選股
 
 static int  g_hoveredCandle=-1;   // index of candle under mouse (-1=none)
 
@@ -198,10 +196,10 @@ static void buildAllTFs(const std::vector<Candle>&daily,
                         const std::string&code,const std::string&nameIn,
                         TFStore out[5]){
     int n=(int)daily.size();
-    // TF0: daily last 6 months
-    int d0=std::max(0,n-126);
+    // TF0: daily last 1 year
+    int d0=std::max(0,n-252);
     out[0].clear();out[0].perLbl=false;out[0].pStep=2.f;
-    out[0].name=code+" "+nameIn+" | 日線 6個月";
+    out[0].name=code+" "+nameIn+" | 日線 1年";
     int lastM=-1,lastY=-1;
     for(int i=d0;i<n;i++){
         out[0].cands.push_back(daily[i]);
@@ -469,7 +467,7 @@ static void initHardcoded0050(){
     static const int NM=(int)(sizeof(D_MON)/sizeof(D_MON[0]));
     g_stockCode="0050";g_stockName="元大台灣50";
     g_store[0].clear();g_store[0].perLbl=false;g_store[0].pStep=2.f;
-    g_store[0].name="0050 元大台灣50 | 日線 6個月";
+    g_store[0].name="0050 元大台灣50 | 日線 1年";
     g_store[0].cands.assign(DATA,DATA+ND);
     {static const struct{int i;const char*l;}DM[]={
         {0,"10/25"},{20,"11/25"},{40,"12/25"},{62,"1/26"},{83,"2/26"},{95,"3/26"},{117,"4/26"}};
@@ -508,7 +506,7 @@ static void initHardcoded0050(){
 //  Camera
 // ============================================================
 struct Camera{
-    float r=50.f,yaw=40.f,pitch=22.f;
+    float r=50.f,yaw=0.f,pitch=15.f; // 正中心3D角度
     glm::vec3 tgt{0,7.5f,0};
     glm::vec3 eye()const{float rp=r*cosf(glm::radians(pitch));
         return tgt+glm::vec3(rp*sinf(glm::radians(yaw)),r*sinf(glm::radians(pitch)),rp*cosf(glm::radians(yaw)));}
@@ -914,10 +912,10 @@ static void buildDonChan(std::vector<float>&r,std::vector<float>&b,
         }
     };
 
-    const float pDp = sc*0.034f;
-    // 面向偏移（45度 → 臉部 X 偏移 + Z 調整）
-    const float faceXOff = faceDir * sc * 0.12f;  // 臉往左/右偏
-    const float faceZOff = (faceDir!=0) ? -sc*0.04f : 0.f; // 側臉 Z 稍微收
+    const float pDp = sc*((faceDir!=0)?0.055f:0.034f); // 側臉時表情更突出
+    // 面向偏移（45度 → 臉部 X 偏移，Z 往前突出讓表情可見）
+    const float faceXOff = faceDir * sc * 0.14f;  // 臉往左/右偏
+    const float faceZOff = (faceDir!=0) ? sc*0.06f : 0.f; // 側臉 Z 更突出
 
     // ── 尺寸（squash 不影響這些基準值，只影響渲染）──────────────
     const float bRX = sc*0.26f;
@@ -926,7 +924,7 @@ static void buildDonChan(std::vector<float>&r,std::vector<float>&b,
     const float bRZ = sc*0.27f;
     const float bCY = by+sc*0.28f;   // 固定身體中心（基於 raw bRY）
 
-    const float hRraw=sc*0.34f;
+    const float hRraw=sc*0.42f; // 大頭拉拉熊
     const float hR  = hRraw*(1.f-squashT*0.42f);
     const float hDep= sc*0.30f*(1.f+squashT*0.10f);
     const float hCY = bCY+sc*0.28f*0.65f+hRraw*0.78f; // 固定頭部中心
@@ -970,6 +968,7 @@ static void buildDonChan(std::vector<float>&r,std::vector<float>&b,
 
     // ── 頭部（棕色橢圓柱，squash 縮放）────────────────────────
     ellBody(r,bx,hCY,hDep,hRraw,hRraw*0.86f,16);
+
 
     // ── 耳朵（棕色圓 + 奶褐耳內）──────────────────────────────
     float earActR=earR*(1.f-squashT*0.25f);
@@ -1046,11 +1045,9 @@ static void buildDonChan(std::vector<float>&r,std::vector<float>&b,
     // ── 手臂（誇張跳躍：大幅上舉＋張開）────────────────────────
     {
         float aH=sc*0.085f, aDZ=sc*0.068f, aLen=sc*0.175f;
-        // 跳躍時：手臂大幅拉高、向外張開
-        float aY  =lp(bCY+bRYraw*0.22f, bCY+bRYraw*1.10f, jumpT); // 更高
-        float aLj =lp(aLen, aLen*1.35f, jumpT);                    // 更長（展開）
-        // 手臂角度：跳時向斜上（Y也偏移）
-        float aYtip=lp(aY, aY+aLen*0.80f, jumpT); // 手端比根部更高
+        float aY  =lp(bCY+bRYraw*0.22f, bCY+bRYraw*1.10f, jumpT);
+        float aLj =lp(aLen, aLen*1.35f, jumpT);
+        float aYtip=lp(aY, aY+aLen*0.80f, jumpT);
         float armRootY=aY;
         // 左臂
         pushBox(r,bx-bRX-aLj,bx-bRX,armRootY,armRootY+aH,-aDZ,aDZ);
@@ -1336,6 +1333,88 @@ static void buildLobster(std::vector<float>&r,std::vector<float>&d,
         pushBox(r,lx-s*0.012f,lx+s*0.012f,ly-legLen+lSwing,ly,-s*0.010f,s*0.010f);}
 } // buildLobster
 
+// ============================================================
+//  紙箱怪物（buildBox）
+//  b = 紙箱色（箱體）  d = 深色（表情/膠帶）
+//  ax,ay = 腳底  sc = 縮放  t = 時間  scl = 死亡縮放
+// ============================================================
+static void buildBoxMonster(std::vector<float>&b,std::vector<float>&dk,
+                            float ax,float ay,float sc,
+                            double t,float scl){
+    if(scl<=0.001f)return;
+    float s=sc*0.75f*scl;
+    float bob=sinf((float)t*2.8f)*0.03f*s; // 微微上下晃
+    float cy=ay+bob;
+
+    // ── 箱體（大正方形盒子）──────────────────────────────
+    float bW=s*0.30f, bH=s*0.32f, bD=s*0.25f;
+    pushBox(b,ax-bW,ax+bW,cy,cy+bH*2.f,-bD,bD);
+
+    // ── 箱蓋（頂部微開，兩片翻蓋）──────────────────────
+    float lidY=cy+bH*2.f;
+    float lidH=s*0.05f;
+    float lidAng=sinf((float)t*1.5f)*0.08f*s; // 蓋子微動
+    // 左蓋
+    pushBox(b,ax-bW,ax-bW*0.05f,lidY,lidY+lidH+lidAng,-bD,bD);
+    // 右蓋
+    pushBox(b,ax+bW*0.05f,ax+bW,lidY,lidY+lidH-lidAng,-bD,bD);
+
+    // ── 封箱膠帶（深色十字）────────────────────────────
+    float tape=s*0.028f;
+    float fz=bD+s*0.005f;
+    // 正面垂直膠帶
+    pushBox(dk,ax-tape,ax+tape,cy+bH*0.1f,cy+bH*2.f,fz,fz+s*0.008f);
+    // 正面水平膠帶
+    pushBox(dk,ax-bW,ax+bW,cy+bH*1.0f-tape,cy+bH*1.0f+tape,fz,fz+s*0.008f);
+
+    // ── 哀傷的臉（正面）───────────────────────────────
+    float faceCY=cy+bH*1.2f;
+    float faceZ=fz+s*0.01f;
+
+    // 眼睛（兩個圓，往下垂 = 哀傷）
+    float eXO=bW*0.42f, eR=s*0.045f;
+    float eY=faceCY+bH*0.22f;
+    // 左眼
+    pushBox(dk,ax-eXO-eR,ax-eXO+eR,eY-eR,eY+eR,faceZ,faceZ+s*0.01f);
+    // 右眼
+    pushBox(dk,ax+eXO-eR,ax+eXO+eR,eY-eR,eY+eR,faceZ,faceZ+s*0.01f);
+    // 白色亮點（小方塊）
+    float hlR=eR*0.3f;
+    pushBox(b,ax-eXO+eR*0.3f-hlR,ax-eXO+eR*0.3f+hlR,eY+eR*0.3f-hlR,eY+eR*0.3f+hlR,faceZ+s*0.01f,faceZ+s*0.02f);
+    pushBox(b,ax+eXO+eR*0.3f-hlR,ax+eXO+eR*0.3f+hlR,eY+eR*0.3f-hlR,eY+eR*0.3f+hlR,faceZ+s*0.01f,faceZ+s*0.02f);
+
+    // 八字眉（哀傷，內高外低）
+    float brW=s*0.055f, brH=s*0.015f;
+    float brY=eY+eR+s*0.015f;
+    // 左眉（左低右高）
+    pushBox(dk,ax-eXO-brW,ax-eXO,brY-brH,brY+brH,faceZ,faceZ+s*0.008f);
+    pushBox(dk,ax-eXO,ax-eXO+brW*0.6f,brY,brY+brH*2.5f,faceZ,faceZ+s*0.008f);
+    // 右眉（左高右低）
+    pushBox(dk,ax+eXO-brW*0.6f,ax+eXO,brY,brY+brH*2.5f,faceZ,faceZ+s*0.008f);
+    pushBox(dk,ax+eXO,ax+eXO+brW,brY-brH,brY+brH,faceZ,faceZ+s*0.008f);
+
+    // 嘴巴（大 ∩ 哭嘴）
+    float mW=bW*0.35f, mH=s*0.025f;
+    float mY=faceCY-bH*0.10f;
+    pushBox(dk,ax-mW*0.15f,ax+mW*0.15f,mY+mH,mY+mH*2.5f,faceZ,faceZ+s*0.008f); // 中
+    pushBox(dk,ax+mW*0.15f,ax+mW,mY,mY+mH*1.5f,faceZ,faceZ+s*0.008f);           // 右
+    pushBox(dk,ax-mW,ax-mW*0.15f,mY,mY+mH*1.5f,faceZ,faceZ+s*0.008f);           // 左
+
+    // 眼淚（兩滴）
+    float tW=s*0.016f;
+    pushBox(dk,ax-eXO-tW,ax-eXO+tW,eY-eR-s*0.08f,eY-eR,faceZ,faceZ+s*0.006f);
+    pushBox(dk,ax+eXO-tW,ax+eXO+tW,eY-eR-s*0.08f,eY-eR,faceZ,faceZ+s*0.006f);
+    // 淚珠
+    pushBox(dk,ax-eXO-tW*1.3f,ax-eXO+tW*1.3f,eY-eR-s*0.11f,eY-eR-s*0.08f,faceZ,faceZ+s*0.006f);
+    pushBox(dk,ax+eXO-tW*1.3f,ax+eXO+tW*1.3f,eY-eR-s*0.11f,eY-eR-s*0.08f,faceZ,faceZ+s*0.006f);
+
+    // ── 小腳（底部兩個小方塊）──────────────────────────
+    float ftW=s*0.08f, ftH=s*0.06f;
+    float ftSway=sinf((float)t*3.5f)*0.02f*s;
+    pushBox(dk,ax-bW*0.5f-ftW+ftSway,ax-bW*0.5f+ftW+ftSway,ay-ftH,ay,-bD*0.3f,bD*0.3f);
+    pushBox(dk,ax+bW*0.5f-ftW-ftSway,ax+bW*0.5f+ftW-ftSway,ay-ftH,ay,-bD*0.3f,bD*0.3f);
+} // buildBoxMonster
+
 // 依價格區間自動算出「好看」的刻度步距，目標約 targetN 個標籤
 static float niceStep(float range,int targetN=6){
     if(range<=0.f)return 1.f;
@@ -1411,7 +1490,7 @@ static float  g_bearScreenY  = -1.f;
 
 // ── 遊戲模式（F=左, J=右, 巨蟻怪物）──────────────────────────────
 static bool   g_gameMode     = true;
-static int    g_bearFaceDir  = 0;     // -1=左, 0=正面, +1=右
+static int    g_bearFaceDir  = -1;    // -1=左, 0=正面, +1=右（預設朝左）
 static int    g_gameMoveDir  = 0;     // -1/0/+1 （F/stay/J）
 
 struct AntMonster {
@@ -1426,13 +1505,24 @@ struct AntMonster {
 static std::vector<AntMonster> g_ants;
 static double g_lastAntSpawn = -99.0;
 static double g_slashStartT  = -9.0;  // 揮劍開始時間
+static double g_slashTextT   = -9.0;  // 「割韭菜」文字顯示時間
+// 鈔票投射物
+static double g_cashProjT    = -9.0;  // 投射開始時間
+static float  g_cashProjX    = 0.f;   // 起點 X
+static float  g_cashProjY    = 0.f;   // 起點 Y
+static int    g_cashProjDir  = 1;     // -1=左, +1=右
+static float  g_cashProjEndX = 0.f;  // 最遠目標 X
 static int    g_killCount     = 0;     // 擊殺數
-static float  g_bearHP        = 1000.f; // 熊的血量
+static float  g_bearHP        = 50.f;  // 熊的血量
+static float  g_bearMP        = 50.f;  // 魔法值（滿=50）
 static double g_bearHitT      = -9.0;   // 熊上次被打時間
-static double g_magicT        = -9.0;   // 魔法龍捲風開始時間
+static double g_magicT        = -9.0;   // 魔法開始時間
+static bool   g_bearDead      = false;  // 熊死亡狀態
+static double g_bearDeadT     = -9.0;   // 死亡時間
 static DynLitMesh mBoom;               // 爆炸粒子
 static DynLitMesh mTornado;            // 龍捲風
 static DynLitMesh mLobR,mLobD;        // 龍蝦（紅/深色）
+static DynLitMesh mBoxB,mBoxD;        // 紙箱（箱色/深色）
 
 struct Lobster {
     float  x, y;        // 世界座標
@@ -1447,6 +1537,16 @@ struct Lobster {
 };
 static std::vector<Lobster> g_lobs;
 static double g_lastLobSpawn = -99.0;
+
+struct BoxMon {
+    float  x;
+    bool   alive;
+    double spawnT, deathT;
+    float  hp;          // 200
+    double lastHitT;
+};
+static std::vector<BoxMon> g_boxes;
+static double g_lastBoxSpawn = -99.0;
 struct HPBarInfo{float sx,sy,frac;};   // 血條螢幕座標
 static std::vector<HPBarInfo>g_hpBars; // 每幀更新
 
@@ -1534,7 +1634,7 @@ static std::string getCandleLabel(int idx){
         return best;}
     char b[16];snprintf(b,sizeof(b),"#%d",ai+1);return b;}
 
-static char g_codeBuf[16]="0050";
+static char g_codeBuf[16]="2330";
 static std::string g_failMsg;
 
 // ============================================================
@@ -1603,6 +1703,74 @@ static const Sector SECTORS[]={
     {"生技/醫療",     S_BIO,  (int)(sizeof S_BIO /sizeof*S_BIO)},
 };
 static const int N_SECTORS=(int)(sizeof SECTORS/sizeof*SECTORS);
+
+// ── 啟動選股畫面 ──
+static void drawStockMenu(int fw,int fh){
+    ImVec2 center((float)fw*0.5f,(float)fh*0.5f);
+    float menuW=420.f, menuH=500.f;
+    ImGui::SetNextWindowPos(ImVec2(center.x-menuW*0.5f,center.y-menuH*0.5f),ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(menuW,menuH),ImGuiCond_Always);
+    ImGui::Begin("##stockmenu",nullptr,
+        ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoCollapse);
+
+    // 標題
+    ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(.95f,.82f,.20f,1.f));
+    float titleW=ImGui::CalcTextSize("K-Line RPG").x;
+    ImGui::SetCursorPosX((menuW-titleW)*0.5f);
+    ImGui::Text("K-Line RPG");
+    ImGui::PopStyleColor();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // 輸入股票代碼
+    ImGui::Text("輸入股票代碼：");
+    ImGui::SetNextItemWidth(menuW-20.f);
+    bool enter=ImGui::InputText("##menucode",g_codeBuf,sizeof(g_codeBuf),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::Spacing();
+
+    // 快速選股按鈕
+    ImGui::Text("熱門股票：");
+    struct QuickPick{const char*code;const char*name;};
+    static const QuickPick picks[]={
+        {"2330","台積電"},{"0050","元大台灣50"},{"2317","鴻海"},
+        {"2454","聯發科"},{"2881","富邦金"},{"2882","國泰金"},
+        {"2303","聯電"},{"3711","日月光"},{"2412","中華電"},
+        {"1301","台塑"},{"2308","台達電"},{"2002","中鋼"}};
+    for(int i=0;i<12;i++){
+        if(i%3!=0)ImGui::SameLine();
+        char lbl[32];snprintf(lbl,sizeof(lbl),"%s\n%s##qp%d",picks[i].code,picks[i].name,i);
+        if(ImGui::Button(lbl,ImVec2((menuW-30.f)/3.f,45.f))){
+            strncpy_s(g_codeBuf,sizeof(g_codeBuf),picks[i].code,_TRUNCATE);
+            enter=true;}}
+
+    ImGui::Spacing();
+    // 自選股
+    if(!g_watchlist.empty()){
+        ImGui::Separator();
+        ImGui::Text("自選股：");
+        for(int i=0;i<(int)g_watchlist.size();i++){
+            auto&w=g_watchlist[i];
+            char wl[48];snprintf(wl,sizeof(wl),"%s %s##wm%d",w.code.c_str(),w.name.c_str(),i);
+            if(ImGui::Selectable(wl)){
+                strncpy_s(g_codeBuf,sizeof(g_codeBuf),w.code.c_str(),_TRUNCATE);
+                enter=true;}}}
+
+    // 確認載入
+    if(enter && g_codeBuf[0] && g_mode!=LOADING){
+        g_loadDone=false;g_loadFail=false;g_loadProgress=0;g_failMsg.clear();
+        g_mode=LOADING;
+        std::thread(fetchWorker,std::string(g_codeBuf)).detach();}
+
+    // Loading 狀態
+    if(g_mode==LOADING){
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(.4f,.8f,1.f,1.f),"載入中... %d/%d",
+            g_loadProgress.load(),g_loadTotal.load());}
+    if(!g_failMsg.empty())
+        ImGui::TextColored(ImVec4(1.f,.3f,.2f,1.f),"%s",g_failMsg.c_str());
+
+    ImGui::End();}
 
 static void drawPanel(int fw,int fh){
     float pw=(float)PANEL_W;
@@ -1797,7 +1965,9 @@ static void drawPanel(int fw,int fh){
     if(g_bearActive){
         ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(.25f,.85f,.45f,1.f));
         if(ImGui::Checkbox("遊戲模式 (DF移動 J攻擊 K魔法)",&g_gameMode)){
-            g_gameMoveDir=0;g_ants.clear();g_lobs.clear();g_lastAntSpawn=-99.0;g_lastLobSpawn=-99.0;g_killCount=0;g_bearHP=1000.f;}
+            g_gameMoveDir=0;g_ants.clear();g_lobs.clear();g_boxes.clear();
+            g_lastAntSpawn=g_lastLobSpawn=g_lastBoxSpawn=-99.0;g_killCount=0;
+            g_bearHP=50.f;g_bearMP=50.f;g_bearDead=false;}
         ImGui::PopStyleColor();
         if(g_gameMode){
             ImGui::TextDisabled("韭菜怪物會自動出現！");
@@ -1918,18 +2088,26 @@ void onKey(GLFWwindow*,int k,int sc,int a,int mod){
     if(k==GLFW_KEY_LEFT&&!g_playing&&g_visible>0){g_visible--;g_dirty=true;}
     // ── 遊戲模式：D=左跳, F=右跳, J=攻擊, K=魔法 ──
     if(g_gameMode&&g_bearActive){
+        // 死亡後按 R 重生
+        if(g_bearDead && k==GLFW_KEY_R){
+            g_bearDead=false;g_bearHP=50.f;g_bearMP=50.f;
+            g_ants.clear();g_lobs.clear();g_boxes.clear();g_killCount=0;
+            g_lastAntSpawn=g_lastLobSpawn=g_lastBoxSpawn=-99.0;}
+        if(g_bearDead) return; // 死亡中不接受其他操作
         if(k==GLFW_KEY_D){g_gameMoveDir=-1;g_bearFaceDir=-1;sfxJump();}
         if(k==GLFW_KEY_F){g_gameMoveDir=+1;g_bearFaceDir=+1;sfxJump();}
-        if(k==GLFW_KEY_J){g_slashStartT=glfwGetTime();sfxSlash();} // 鐮刀攻擊
+        if(k==GLFW_KEY_J){g_slashStartT=glfwGetTime();g_slashTextT=glfwGetTime();sfxSlash();}
         if(k==GLFW_KEY_K){
-            // 大型魔法（龍捲風，消耗 $5000）
-            int curMoney=10000+g_killCount*100;
-            if(curMoney>=5000){
-                g_killCount-=50;if(g_killCount<0)g_killCount=0;
+            // 魔法：丟一捆鈔票（面向方向，打5隻，消耗 50 MP）
+            if(g_bearMP>=50.f && !g_bearDead){
+                g_bearMP-=50.f;
                 double now2=glfwGetTime();
-                for(auto&a:g_ants){if(a.alive){a.alive=false;a.deathT=now2;g_killCount++;}}
-                for(auto&lb:g_lobs){if(lb.alive){lb.alive=false;lb.deathT=now2;g_killCount++;}}
-                g_hitBarIdx=-2;g_hitBarStartT=now2;g_magicT=now2;sfxMagic();}}}}
+                g_cashProjT=now2;
+                g_cashProjX=g_bearIdx*g_sp;
+                g_cashProjY=0.f; // 會在 render 時用 bearY 修正
+                g_cashProjDir=g_bearFaceDir; if(g_cashProjDir==0)g_cashProjDir=1;
+                g_magicT=now2;
+                sfxMagic();}}}}
 void onChar(GLFWwindow*,unsigned int cp){ImGui_ImplGlfw_CharCallback(g_win,cp);}
 void onMB(GLFWwindow*w,int b,int a,int mod){
     ImGui_ImplGlfw_MouseButtonCallback(g_win,b,a,mod);
@@ -1986,13 +2164,10 @@ int main(){
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3);glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3);
     glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_CORE_PROFILE);glfwWindowHint(GLFW_SAMPLES,4);
     g_win=glfwCreateWindow(1280,800,"3D K-Line Chart",nullptr,nullptr);
+    if(g_win)glfwMaximizeWindow(g_win); // 視窗放最大
     if(!g_win){glfwTerminate();return 1;}
     glfwMakeContextCurrent(g_win);glfwSwapInterval(1);
     // Set callbacks BEFORE ImGui init so ImGui can chain them
-    // 游標限制在視窗內（全螢幕用 ClipCursor）
-    {HWND hw=glfwGetWin32Window(g_win);RECT rc;GetClientRect(hw,&rc);
-     POINT pt={0,0};ClientToScreen(hw,&pt);
-     OffsetRect(&rc,pt.x,pt.y);ClipCursor(&rc);}
     glfwSetKeyCallback(g_win,onKey);glfwSetCharCallback(g_win,onChar);
     glfwSetMouseButtonCallback(g_win,onMB);glfwSetCursorPosCallback(g_win,onCursor);
     glfwSetScrollCallback(g_win,onScroll);
@@ -2064,11 +2239,11 @@ int main(){
     mLabel.init();mHoverLine.init();
     mChr0.init();mChr1.init();mChr2.init();mChr3.init();mChr4.init();
     mLeekG.init();mLeekW.init();mLeekD.init();mBoom.init();mTornado.init();
-    mLobR.init();mLobD.init();
-    initHardcoded0050();
+    mLobR.init();mLobD.init();mBoxB.init();mBoxD.init();
+    initHardcoded0050(); // 備用資料
     loadWatchlist();
     recalcLayout();
-    g_tf=0;g_visible=tfMaxVis(0);  // 預設日K
+    g_tf=0;g_visible=tfMaxVis(0);
 
     auto uM4=[](GLuint p,const char*n,const glm::mat4&m){glUniformMatrix4fv(glGetUniformLocation(p,n),1,GL_FALSE,glm::value_ptr(m));};
     auto uM3=[](GLuint p,const char*n,const glm::mat3&m){glUniformMatrix3fv(glGetUniformLocation(p,n),1,GL_FALSE,glm::value_ptr(m));};
@@ -2081,8 +2256,8 @@ int main(){
 
         // Async load completion
         if(g_loadFail.exchange(false)){
-            g_mode=NORMAL;
-            g_failMsg=std::string(g_codeBuf)+" 查無資料";}
+            g_failMsg=std::string(g_codeBuf)+" 查無資料";
+            g_mode=MENU;} // 失敗回選單
         if(g_loadDone.exchange(false)){
             buildTFViews();g_tf=0;g_visible=tfMaxVis(0);
             g_playing=false;g_panOffset=0;g_hitBarIdx=-1,g_bearNeedsInit=true;g_mode=NORMAL;g_dirty=true;}
@@ -2175,19 +2350,24 @@ int main(){
                 if(g_bearNeedsInit){
                     g_bearIdx=bn/2; g_bearPrevIdx=bn/2;
                     g_bearFromY=g_bearToY=toW(bd[bn/2].h);
-                    g_bearPhase=0.4; g_bearLastTime=glfwGetTime();
+                    g_bearPhase=1.0; g_bearLastTime=glfwGetTime();
                     g_bearNeedsInit=false;}
                 // 推進動畫
                 double bnow=glfwGetTime();
                 double bdt=bnow-g_bearLastTime;
                 float prevPhase=(float)g_bearPhase;
                 if(g_gameMode){
-                    // 遊戲模式：只有按 D/F 才推進跳躍；待機時停在 phase=1.0
-                    if(g_gameMoveDir!=0 || g_bearPhase<1.0)
-                        g_bearPhase+=bdt/0.52;
-                    // 推進下一根 K 棒
-                    if(g_bearPhase>=1.0){
-                        g_bearPhase-=1.0;
+                    // 遊戲模式：D/F 平移（不跳）
+                    if(g_bearPhase<1.0){
+                        g_bearPhase+=bdt/0.30; // 0.3秒滑到下一格
+                    }
+                    if(g_bearPhase>=1.0 && prevPhase<1.0){
+                        g_bearPhase=1.0;
+                        g_bearPrevIdx=g_bearIdx;
+                        g_bearFromY=g_bearToY=toW(bd[g_bearIdx].h);}
+                    // 按鍵觸發平移
+                    if(g_bearPhase>=1.0 && g_gameMoveDir!=0){
+                        g_bearPhase=0.0;
                         g_bearPrevIdx=g_bearIdx;
                         int nxt=g_bearIdx+g_gameMoveDir;
                         nxt=std::max(0,std::min(bn-1,nxt));
@@ -2215,22 +2395,12 @@ int main(){
                     // 遊戲模式待機
                     bearX=(float)g_bearIdx*g_sp;
                     bearY=toW(bd[g_bearIdx].h);
-                } else if(g_bearPhase<JUMP_END){
-                    // 遊戲模式跳躍（有弧線）
-                    float t=(float)(g_bearPhase/JUMP_END);
+                } else {
+                    // 遊戲模式平移（smoothstep，不跳）
+                    float t=(float)g_bearPhase;
                     float easeT=t*t*(3.f-2.f*t);
                     bearX=g_bearPrevIdx*g_sp+(g_bearIdx*g_sp-g_bearPrevIdx*g_sp)*easeT;
-                    float arcT=sinf(t*3.14159f);
-                    bearY=g_bearFromY+(g_bearToY-g_bearFromY)*easeT+sc*4.5f*arcT;
-                    jumpT  = arcT;
-                    squashT= -0.30f*arcT;
-                } else {
-                    // 遊戲模式落地
-                    float t2=(float)((g_bearPhase-JUMP_END)/(1.0-JUMP_END));
-                    bearX=(float)g_bearIdx*g_sp;
-                    bearY=g_bearToY;
-                    squashT=(t2<0.15f)?(t2/0.15f)*0.35f
-                            :(t2<0.30f)?((0.30f-t2)/0.15f)*0.35f:0.f;
+                    bearY=g_bearFromY+(g_bearToY-g_bearFromY)*easeT;
                 }
                 bearY+=sc*0.02f;
 
@@ -2251,12 +2421,11 @@ int main(){
                             AntMonster am;
                             am.x=ax; am.alive=true;
                             am.facingLeft=(ax>bearX);
-                            am.spawnT=bnow+(si*0.15); am.deathT=-1.0; am.hp=50.f; am.lastHitT=-9.0;
+                            am.spawnT=bnow+(si*0.15); am.deathT=-1.0; am.hp=100.f; am.lastHitT=-9.0;
                             g_ants.push_back(am);}
                         g_lastAntSpawn=bnow;}
                     // 移動韭菜（越殺越快）
-                    float antSpeed=g_sp*(0.45f+g_killCount*0.015f);
-                    if(antSpeed>g_sp*1.8f)antSpeed=g_sp*1.8f;
+                    float antSpeed=g_sp*1.0f; // 韭菜：1格/秒
                     for(auto&a:g_ants){
                         if(!a.alive)continue;
                         float dir=(bearX>a.x)?1.f:-1.f;
@@ -2270,14 +2439,14 @@ int main(){
                              int dmg=5+rand()%6;
                              g_bearHP-=dmg;
                              g_bearHitT=bnow;sfxBearHit();
-                             if(g_bearHP<0.f)g_bearHP=0.f;
+                             if(g_bearHP<=0.f){g_bearHP=0.f;if(!g_bearDead){g_bearDead=true;g_bearDeadT=glfwGetTime();}}
                              break;}}}
                     // 揮鐮刀偵測（滑鼠左鍵觸發，見 onMB）
                     // 鐮刀傷害（命中期：slashT 0.28~0.72，每次揮砍只打一下）
                     float slashElapsed=(float)(bnow-g_slashStartT);
                     float slashT2=(slashElapsed<0.f)?0.f:std::min(1.f,slashElapsed/0.45f);
                     if(slashT2>0.28f&&slashT2<0.72f){
-                        float hitRange=g_sp*1.4f;
+                        float hitRange=g_sp*5.0f; // 打 5 根 K 棒遠
                         for(auto&a:g_ants){
                             if(!a.alive)continue;
                             if(std::fabs(a.x-bearX)<hitRange && (bnow-a.lastHitT)>0.35){
@@ -2285,7 +2454,7 @@ int main(){
                                 a.hp-=dmg;
                                 a.lastHitT=bnow;
                                 if(a.hp<=0.f){
-                                    a.alive=false;a.deathT=bnow;g_killCount++;sfxKill();
+                                    a.alive=false;a.deathT=bnow;g_killCount++;g_bearMP=std::min(50.f,g_bearMP+10.f);sfxKill();
                                 } else {sfxHit();}
                             }}}
                     // 清除已消散（死亡 >0.8 秒）
@@ -2307,7 +2476,7 @@ int main(){
                             glm::vec4 sp2=MVP*glm::vec4(a.x,topY,0.f,1.f);sp2/=sp2.w;
                             hpBars.push_back({(sp2.x+1.f)*0.5f*(float)vw,
                                               (1.f-sp2.y)*0.5f*(float)fh,
-                                              a.hp/50.f});
+                                              a.hp/100.f});
                         } else {
                             // 爆炸粒子：綠色碎片向四面八方飛散
                             float dt2=(float)(bnow-a.deathT);
@@ -2331,65 +2500,87 @@ int main(){
                     if(!boomV.empty()){
                         mBoom.upload(boomV);
                         uV3(pLit,"uCol",{.45f,.95f,.25f});mBoom.draw();}
-                    // ── 龍捲風魔法（全畫面左右來回掃 + 震動）────────
-                    {double magicE=bnow-g_magicT;
-                     float magicDur=2.0f;
-                     if(magicE>=0.0 && magicE<magicDur){
-                         float mt=(float)(magicE/magicDur);
-                         float mAlpha=(mt<0.15f)?(mt/0.15f):(1.f-(mt-0.15f)/0.85f); // 淡入淡出
-                         mAlpha=glm::clamp(mAlpha,0.f,1.f);
-                         std::vector<float>torV;
-                         float xMin=0.f, xMax=(bn-1)*g_sp;
-                         // 來回掃射 2 趟
-                         float sweep=sinf(mt*3.14159f*3.f);
-                         float torX=(xMin+xMax)*0.5f+sweep*(xMax-xMin)*0.48f;
-                         float torH=(WORLD_HI-WORLD_LO)*1.6f;
-                         float now3=(float)bnow;
+                    // ── 鈔票投射魔法（丟一捆鈔票，面向方向飛出，打5隻）──
+                    // 修正投射 Y（用當前 bearY）
+                    if(bnow-g_cashProjT<0.05 && g_cashProjY==0.f)
+                        g_cashProjY=bearY;
+                    {double projE=bnow-g_cashProjT;
+                     float projDur=1.0f; // 飛行 1 秒
+                     if(projE>=0.0 && projE<projDur){
+                         float pt2=(float)(projE/projDur);
+                         // 飛向最遠目標（smoothstep）
+                         float easeP=pt2*pt2*(3.f-2.f*pt2);
+                         float projX=g_cashProjX+(g_cashProjEndX-g_cashProjX)*easeP;
+                         float projY=g_cashProjY+sc*0.5f+sinf(pt2*6.28f)*sc*0.3f; // 微微上下飄
+                         float pAlpha=(pt2<0.1f)?(pt2/0.1f):(pt2>0.8f)?(1.f-(pt2-0.8f)/0.2f):1.f;
 
-                         // 主體漏斗（密集螺旋）
-                         int rings=36;
-                         for(int ri=0;ri<rings;ri++){
-                             float yFrac=(float)ri/rings;
-                             float ry=WORLD_LO-2.f+yFrac*torH;
-                             float rad=sc*(3.2f-yFrac*2.2f)*mAlpha;
-                             float spin=now3*12.f+yFrac*18.f;
-                             int segs=14;
-                             for(int si=0;si<segs;si++){
-                                 float a2=spin+si*6.2832f/segs;
-                                 float px=torX+cosf(a2)*rad;
-                                 float pz=sinf(a2)*rad*0.35f;
-                                 float bsz=sc*0.07f*mAlpha*(0.6f+yFrac*0.8f);
-                                 pushBox(torV,px-bsz,px+bsz,ry-bsz,ry+bsz,pz-bsz,pz+bsz);}}
-                         // 外圈碎片雲（較大塊，更寬旋轉）
-                         for(int ri=0;ri<20;ri++){
-                             float yFrac=(float)ri/20;
-                             float ry=WORLD_LO-1.f+yFrac*torH*0.9f;
-                             float rad2=sc*(4.0f-yFrac*2.5f)*mAlpha;
-                             float spin2=now3*7.f-yFrac*10.f; // 反向旋轉
-                             for(int si=0;si<8;si++){
-                                 float a2=spin2+si*6.2832f/8;
-                                 float px=torX+cosf(a2)*rad2;
-                                 float pz=sinf(a2)*rad2*0.3f;
-                                 float bsz=sc*0.12f*mAlpha*(0.4f+yFrac*0.5f);
-                                 pushBox(torV,px-bsz,px+bsz,ry-bsz*1.5f,ry+bsz*1.5f,pz-bsz,pz+bsz);}}
-                         // 底部塵土飛揚
-                         for(int di=0;di<16;di++){
-                             float da=now3*5.f+di*0.393f;
-                             float dr=sc*(2.5f+sinf(di*1.7f)*1.5f)*mAlpha;
-                             float dx=torX+cosf(da)*dr;
-                             float dz=sinf(da)*dr*0.4f;
-                             float dy=WORLD_LO-0.5f+sinf(now3*3.f+di)*sc*0.3f;
-                             float ds=sc*0.09f*mAlpha;
-                             pushBox(torV,dx-ds,dx+ds,dy-ds*0.5f,dy+ds*0.5f,dz-ds,dz+ds);}
+                         // 碰撞檢測：打面向方向最近 5 隻怪物（只在剛發射時判定一次）
+                         if(projE<0.05){
+                             int hits=0;
+                             g_cashProjEndX=g_cashProjX+(float)g_cashProjDir*g_sp*8.f; // 預設飛 8 格
+                             // 打韭菜
+                             for(auto&a:g_ants){
+                                 if(!a.alive||hits>=5)continue;
+                                 float dx5=a.x-g_cashProjX;
+                                 if(g_cashProjDir>0?dx5>0:dx5<0){
+                                     int dmg=20+rand()%41;
+                                     a.hp-=dmg;a.lastHitT=bnow;
+                                     if(a.hp<=0.f){a.alive=false;a.deathT=bnow;g_killCount++;g_bearMP=std::min(50.f,g_bearMP+10.f);sfxKill();}
+                                     else sfxHit();
+                                     // 記錄最遠目標
+                                     if(g_cashProjDir>0?a.x>g_cashProjEndX:a.x<g_cashProjEndX)
+                                         g_cashProjEndX=a.x;
+                                     hits++;}}
+                             // 打龍蝦
+                             for(auto&lb:g_lobs){
+                                 if(!lb.alive||hits>=5)continue;
+                                 float dx6=lb.x-g_cashProjX;
+                                 if(g_cashProjDir>0?dx6>0:dx6<0){
+                                     int dmg=20+rand()%41;
+                                     lb.hp-=dmg;lb.lastHitT=bnow;
+                                     if(lb.hp<=0.f){lb.alive=false;lb.deathT=bnow;g_killCount++;g_bearMP=std::min(50.f,g_bearMP+10.f);sfxKill();}
+                                     if(g_cashProjDir>0?lb.x>g_cashProjEndX:lb.x<g_cashProjEndX)
+                                         g_cashProjEndX=lb.x;
+                                     hits++;}}}
 
+                         // 渲染飛行鈔票捆（大捆 + 散落小鈔）
+                         std::vector<float>torV,torV2;
+                         // 主體鈔票捆（大型長方體，綠色）
+                         float bW=sc*0.45f*pAlpha, bH=sc*0.25f*pAlpha, bD=sc*0.15f*pAlpha;
+                         float rot2=(float)projE*12.f; // 旋轉
+                         float rW=bW*std::fabs(cosf(rot2))+bD*std::fabs(sinf(rot2));
+                         pushBox(torV2,projX-rW,projX+rW,projY-bH,projY+bH,-bD,bD);
+                         // 金色綁帶（十字）
+                         float band=sc*0.035f*pAlpha;
+                         pushBox(torV,projX-rW*1.02f,projX+rW*1.02f,projY-band,projY+band,-bD*1.1f,bD*1.1f);
+                         pushBox(torV,projX-band,projX+band,projY-bH*1.02f,projY+bH*1.02f,-bD*1.1f,bD*1.1f);
+                         // $ 符號（鈔票捆正面）
+                         float sz=sc*0.04f*pAlpha;
+                         pushBox(torV,projX-sz*2.f,projX+sz*2.f,projY+sz,projY+sz*2.5f,bD,bD+sz*0.5f);
+                         pushBox(torV,projX-sz*2.f,projX+sz*2.f,projY-sz*2.5f,projY-sz,bD,bD+sz*0.5f);
+                         pushBox(torV,projX-sz*2.f,projX+sz*2.f,projY-sz*0.5f,projY+sz*0.5f,bD,bD+sz*0.5f);
+                         pushBox(torV,projX-sz*0.3f,projX+sz*0.3f,projY-sz*3.f,projY+sz*3.f,bD,bD+sz*0.5f);
+                         // 散落小鈔票（拖尾）
+                         for(int ti=0;ti<8;ti++){
+                             float tSeed=(float)(ti*73+11);
+                             float tDelay=ti*0.06f;
+                             if(projE<tDelay)continue;
+                             float tLife=(float)(projE-tDelay);
+                             float tAlpha=std::max(0.f,1.f-tLife*2.f)*pAlpha;
+                             float tpx=projX-(float)g_cashProjDir*g_sp*tLife*6.f+sinf(tSeed)*sc*0.3f;
+                             float tpy=projY+cosf(tSeed*0.7f)*sc*0.4f-tLife*sc*0.5f;
+                             float tsz=sc*0.12f*tAlpha;
+                             pushBox(torV2,tpx-tsz*1.5f,tpx+tsz*1.5f,tpy-tsz,tpy+tsz,-tsz*0.1f,tsz*0.1f);}
+
+                         // 畫鈔票底色
+                         mBoom.upload(torV2);
+                         uV3(pLit,"uCol",{.35f*pAlpha,.68f*pAlpha,.30f*pAlpha});
+                         mBoom.draw();
+                         // 畫金色部分
                          mTornado.upload(torV);
-                         uV3(pLit,"uCol",{.20f*mAlpha,.55f*mAlpha,.92f*mAlpha});
+                         uV3(pLit,"uCol",{.95f*pAlpha,.82f*pAlpha,.18f*pAlpha});
                          mTornado.draw();
-                         // 持續震動（整個龍捲風期間）
-                         g_hitBarIdx=-2; g_hitBarStartT=bnow-0.01;
-                     } else if(magicE>=magicDur && magicE<magicDur+0.4){
-                         // 震動收尾
-                         if(g_hitBarIdx==-2) g_hitBarIdx=-1;}}
+                     }}
                     // ── 龍蝦生成 & 飛行 & 傷害 ────────────────────────
                     {int lobAlive=0;
                      for(auto&lb:g_lobs)if(lb.alive)lobAlive++;
@@ -2403,8 +2594,8 @@ int main(){
                              int lbi2=rand()%bn;
                              lb.y=toW(bd[lbi2].h)+sc*(0.8f+0.6f*(rand()%100)/100.f);
                              lb.alive=true; lb.facingLeft=(rand()%2==0);
-                             lb.spawnT=bnow; lb.deathT=-1.0; lb.hp=80.f; lb.lastHitT=-9.0;
-                             lb.flySpeed=g_sp*(0.6f+0.4f*(rand()%100)/100.f);
+                             lb.spawnT=bnow; lb.deathT=-1.0; lb.hp=300.f; lb.lastHitT=-9.0;
+                             lb.flySpeed=g_sp*3.0f; // 龍蝦：3格/秒
                              lb.flyAng=(rand()%628)/100.f; // 0~2PI
                              g_lobs.push_back(lb);}
                          g_lastLobSpawn=bnow;}
@@ -2426,7 +2617,7 @@ int main(){
                          lb.facingLeft=(cosf(lb.flyAng)<0.f);}
                      // 鐮刀打龍蝦
                      if(slashT2>0.28f&&slashT2<0.72f){
-                         float hitR=g_sp*1.6f;
+                         float hitR=g_sp*5.0f; // 打 5 根 K 棒遠
                          for(auto&lb:g_lobs){
                              if(!lb.alive)continue;
                              float dx3=lb.x-bearX, dy3=lb.y-(bearY+sc*0.5f);
@@ -2441,7 +2632,7 @@ int main(){
                          if(sqrtf(dx4*dx4+dy4*dy4)<g_sp*1.0f && (bnow-g_bearHitT)>0.8){
                              g_bearHP-=(5+rand()%11); // 5~15
                              g_bearHitT=bnow;
-                             if(g_bearHP<0.f)g_bearHP=0.f;break;}}
+                             if(g_bearHP<=0.f){g_bearHP=0.f;if(!g_bearDead){g_bearDead=true;g_bearDeadT=glfwGetTime();}}break;}}
                      // 右鍵魔法也殺龍蝦
                      if(g_hitBarIdx==-2){
                          double me2=bnow-g_hitBarStartT;
@@ -2462,10 +2653,73 @@ int main(){
                              glm::vec4 sp3=MVP*glm::vec4(lb.x,topY2,0.f,1.f);sp3/=sp3.w;
                              hpBars.push_back({(sp3.x+1.f)*0.5f*(float)vw,
                                                (1.f-sp3.y)*0.5f*(float)fh,
-                                               lb.hp/80.f});}}
+                                               lb.hp/300.f});}}
                      mLobR.upload(lobR);mLobD.upload(lobD);
                      uV3(pLit,"uCol",{.85f,.18f,.12f});mLobR.draw(); // 紅色龍蝦
                      uV3(pLit,"uCol",{.10f,.08f,.06f});mLobD.draw();} // 深色(眼/觸角)
+
+                    // ── 紙箱怪物生成 & 移動 & 傷害 ──────────────────
+                    {int boxAlive=0;
+                     for(auto&bm:g_boxes)if(bm.alive)boxAlive++;
+                     if(boxAlive<2 && bnow-g_lastBoxSpawn>5.0){ // 最多2隻，每5秒
+                         BoxMon bm;
+                         bm.x=(rand()%bn)*g_sp;
+                         bm.alive=true;bm.spawnT=bnow;bm.deathT=-1.0;bm.hp=200.f;bm.lastHitT=-9.0;
+                         g_boxes.push_back(bm);
+                         g_lastBoxSpawn=bnow;}
+                     // 移動（緩慢向熊靠近）
+                     float boxSpd=g_sp*2.0f; // 紙箱：2格/秒
+                     for(auto&bm:g_boxes){
+                         if(!bm.alive)continue;
+                         float dir2=(bearX>bm.x)?1.f:-1.f;
+                         bm.x+=dir2*boxSpd*(float)bdt;}
+                     // 紙箱攻擊熊（靠近）
+                     for(auto&bm:g_boxes){
+                         if(!bm.alive)continue;
+                         if(std::fabs(bm.x-bearX)<g_sp*0.8f && (bnow-g_bearHitT)>0.8){
+                             g_bearHP-=(8+rand()%8); // 8~15
+                             g_bearHitT=bnow;sfxBearHit();
+                             if(g_bearHP<=0.f){g_bearHP=0.f;if(!g_bearDead){g_bearDead=true;g_bearDeadT=glfwGetTime();}}break;}}
+                     // 鐮刀打紙箱
+                     if(slashT2>0.28f&&slashT2<0.72f){
+                         float hitR2=g_sp*5.0f;
+                         for(auto&bm:g_boxes){
+                             if(!bm.alive)continue;
+                             if(std::fabs(bm.x-bearX)<hitR2 && (bnow-bm.lastHitT)>0.35){
+                                 int dmg=10+rand()%21;
+                                 bm.hp-=dmg;bm.lastHitT=bnow;
+                                 if(bm.hp<=0.f){bm.alive=false;bm.deathT=bnow;g_killCount++;g_bearMP=std::min(50.f,g_bearMP+10.f);sfxKill();}
+                                 else sfxHit();}}}
+                     // 鈔票魔法打紙箱
+                     double projE2=bnow-g_cashProjT;
+                     if(projE2>=0.0&&projE2<0.05){
+                         for(auto&bm:g_boxes){
+                             if(!bm.alive)continue;
+                             float dx7=bm.x-g_cashProjX;
+                             if(g_cashProjDir>0?dx7>0:dx7<0){
+                                 int dmg=20+rand()%41;
+                                 bm.hp-=dmg;bm.lastHitT=bnow;
+                                 if(bm.hp<=0.f){bm.alive=false;bm.deathT=bnow;g_killCount++;g_bearMP=std::min(50.f,g_bearMP+10.f);sfxKill();}}}}
+                     // 清除
+                     g_boxes.erase(std::remove_if(g_boxes.begin(),g_boxes.end(),
+                         [&](const BoxMon&bm){return !bm.alive&&(bnow-bm.deathT)>0.8;}),
+                         g_boxes.end());
+                     // 渲染紙箱
+                     std::vector<float>boxB,boxDk;
+                     for(auto&bm:g_boxes){
+                         int bi3=glm::clamp((int)std::round(bm.x/g_sp),0,bn-1);
+                         float boxY=toW(bd[bi3].h)+sc*0.02f;
+                         float bscl=bm.alive?1.f:std::max(0.f,1.f-(float)((bnow-bm.deathT)/0.5));
+                         buildBoxMonster(boxB,boxDk,bm.x,boxY,sc,bm.spawnT,bscl);
+                         if(bm.alive){
+                             float topY3=boxY+sc*1.0f;
+                             glm::vec4 sp6=MVP*glm::vec4(bm.x,topY3,0.f,1.f);sp6/=sp6.w;
+                             hpBars.push_back({(sp6.x+1.f)*0.5f*(float)vw,
+                                               (1.f-sp6.y)*0.5f*(float)fh,
+                                               bm.hp/200.f});}}
+                     mBoxB.upload(boxB);mBoxD.upload(boxDk);
+                     uV3(pLit,"uCol",{.72f,.58f,.38f});mBoxB.draw(); // 紙箱色
+                     uV3(pLit,"uCol",{.18f,.14f,.10f});mBoxD.draw();} // 深色
 
                     // 存血條資料供 ImGui 繪製
                     g_hpBars.clear();
@@ -2497,7 +2751,7 @@ int main(){
                 }
 
                 // 投影到螢幕（報價泡泡用）
-                float bearTopY=bearY+sc*1.32f;
+                float bearTopY=bearY+sc*1.55f; // 大頭
                 {glm::vec4 sp=MVP*glm::vec4(bearX,bearTopY,0.f,1.f);sp/=sp.w;
                  g_bearScreenX=(sp.x+1.f)*0.5f*(float)vw;
                  g_bearScreenY=(1.f-sp.y)*0.5f*(float)fh;}
@@ -2536,6 +2790,9 @@ int main(){
         // ImGui (full framebuffer viewport)
         glViewport(0,0,fw,fh);
         ImGui_ImplOpenGL3_NewFrame();ImGui_ImplGlfw_NewFrame();ImGui::NewFrame();
+        if(g_mode==MENU||g_mode==LOADING){
+            drawStockMenu(fw,fh);
+        } else {
         // Update hover AFTER NewFrame so ImGui mouse state is ready
         double mx,my;glfwGetCursorPos(g_win,&mx,&my);
         updateHover(mx,my,vw,fh,MVP);
@@ -2543,6 +2800,84 @@ int main(){
         drawHoverTooltip();
         drawCrosshairOverlay(vw,fh,MVP);
         drawBearPriceBubble(vw,fh);
+        // ── 魔法時熊說「本多終勝」（泡泡框）──
+        if(g_gameMode&&g_bearScreenX>0.f){
+            double magE2=glfwGetTime()-g_magicT;
+            if(magE2>=0.0 && magE2<2.0){
+                float ma2=(float)magE2;
+                float alpha3=(ma2<0.15f)?(ma2/0.15f):(ma2>1.5f)?(1.f-(ma2-1.5f)/0.5f):1.f;
+                alpha3=glm::clamp(alpha3,0.f,1.f);
+                ImDrawList*dl=ImGui::GetForegroundDrawList();
+                ImFont*font=ImGui::GetFont();
+                float fs=ImGui::GetFontSize()*2.8f;
+                const char*txt="\xe6\x9c\xac\xe5\xa4\x9a\xe7\xb5\x82\xe5\x8b\x9d"; // 本多終勝
+                ImVec2 tsz=font->CalcTextSizeA(fs,FLT_MAX,0.f,txt);
+                float pad=12.f;
+                float tx6=g_bearScreenX-tsz.x*0.5f;
+                float ty6=g_bearScreenY-120.f;
+                // 泡泡框
+                dl->AddRectFilled(ImVec2(tx6-pad,ty6-pad),ImVec2(tx6+tsz.x+pad,ty6+tsz.y+pad),
+                    IM_COL32(255,255,255,(int)(230*alpha3)),12.f);
+                dl->AddRect(ImVec2(tx6-pad,ty6-pad),ImVec2(tx6+tsz.x+pad,ty6+tsz.y+pad),
+                    IM_COL32(220,180,30,(int)(220*alpha3)),12.f,0,2.5f);
+                // 小三角指向熊
+                float triX2=g_bearScreenX;
+                float triY2=ty6+tsz.y+pad;
+                dl->AddTriangleFilled(ImVec2(triX2-8,triY2),ImVec2(triX2+8,triY2),
+                    ImVec2(triX2,triY2+12),IM_COL32(255,255,255,(int)(230*alpha3)));
+                // 金色文字
+                dl->AddText(font,fs,ImVec2(tx6,ty6),IM_COL32(220,170,20,(int)(255*alpha3)),txt);}}
+        // ── 「割韭菜！」浮動文字 ──
+        if(g_gameMode&&g_bearScreenX>0.f){
+            double stE=glfwGetTime()-g_slashTextT;
+            if(stE>=0.0&&stE<1.0){
+                float st2=(float)stE;
+                float alpha4=(st2<0.2f)?(st2/0.2f):(1.f-(st2-0.2f)/0.8f);
+                alpha4=glm::clamp(alpha4,0.f,1.f);
+                float rise=st2*30.f; // 向上飄
+                ImDrawList*dl=ImGui::GetForegroundDrawList();
+                ImFont*font=ImGui::GetFont();
+                float fs=ImGui::GetFontSize()*2.2f;
+                const char*txt="\xe5\x89\xb2\xe9\x9f\xad\xe8\x8f\x9c\xef\xbc\x81"; // 割韭菜！
+                ImVec2 tsz=font->CalcTextSizeA(fs,FLT_MAX,0.f,txt);
+                float tx4=g_bearScreenX-tsz.x*0.5f;
+                float ty4=g_bearScreenY-80.f-rise;
+                // 泡泡框
+                float pad=8.f;
+                ImVec2 tsz2=font->CalcTextSizeA(fs,FLT_MAX,0.f,txt);
+                float bx4=tx4-pad, by4=ty4-pad;
+                float bx4r=tx4+tsz2.x+pad, by4b=ty4+tsz2.y+pad;
+                dl->AddRectFilled(ImVec2(bx4,by4),ImVec2(bx4r,by4b),IM_COL32(255,255,255,(int)(220*alpha4)),10.f);
+                dl->AddRect(ImVec2(bx4,by4),ImVec2(bx4r,by4b),IM_COL32(60,60,60,(int)(200*alpha4)),10.f,0,2.f);
+                // 小三角（指向熊）
+                float triX=g_bearScreenX, triY=by4b;
+                dl->AddTriangleFilled(ImVec2(triX-6,triY),ImVec2(triX+6,triY),
+                    ImVec2(triX,triY+10),IM_COL32(255,255,255,(int)(220*alpha4)));
+                // 文字
+                dl->AddText(font,fs,ImVec2(tx4,ty4),IM_COL32(255,60,30,(int)(255*alpha4)),txt);}}
+        // ── 魔法鈔票「$1000」文字 ──
+        if(g_gameMode){
+            double pjE=glfwGetTime()-g_cashProjT;
+            if(pjE>=0.0&&pjE<1.0){
+                float pjt=(float)pjE;
+                float projSpeed=g_sp*18.f;
+                float pjX=g_cashProjX+(float)g_cashProjDir*projSpeed*pjt;
+                float sc5=std::max(0.50f,(WORLD_HI-WORLD_LO)*0.22f);
+                float pjY=g_cashProjY+sc5*0.5f+sinf(pjt*6.28f)*sc5*0.3f;
+                glm::vec4 sp5=MVP*glm::vec4(pjX,pjY+sc5*0.4f,0.f,1.f);sp5/=sp5.w;
+                float sx5=(sp5.x+1.f)*0.5f*(float)vw;
+                float sy5=(1.f-sp5.y)*0.5f*(float)fh;
+                float pAlpha2=(pjt<0.1f)?(pjt/0.1f):(pjt>0.7f)?(1.f-(pjt-0.7f)/0.3f):1.f;
+                ImDrawList*dl=ImGui::GetForegroundDrawList();
+                ImFont*font=ImGui::GetFont();
+                float fs=ImGui::GetFontSize()*2.5f;
+                const char*txt="$1000";
+                ImVec2 tsz=font->CalcTextSizeA(fs,FLT_MAX,0.f,txt);
+                float tx5=sx5-tsz.x*0.5f, ty5=sy5-tsz.y;
+                ImU32 outC=IM_COL32(0,0,0,(int)(180*pAlpha2));
+                for(int ox=-2;ox<=2;ox++)for(int oy=-2;oy<=2;oy++)
+                    if(ox||oy)dl->AddText(font,fs,ImVec2(tx5+ox,ty5+oy),outC,txt);
+                dl->AddText(font,fs,ImVec2(tx5,ty5),IM_COL32(255,220,40,(int)(255*pAlpha2)),txt);}}
         // ── 韭菜血條 ──
         if(g_gameMode&&!g_hpBars.empty()){
             ImDrawList*dl=ImGui::GetForegroundDrawList();
@@ -2561,46 +2896,71 @@ int main(){
                 // HP 數字
                 char hpTxt[8];snprintf(hpTxt,sizeof(hpTxt),"%d",(int)(fill*80.f+0.5f));
                 dl->AddText(ImVec2(bx+bW+3,by-2),IM_COL32(255,255,255,200),hpTxt);}}
-        // ── 遊戲模式頂部 HUD（Bar 風格）──
+        // ── 遊戲模式頂部 HUD ──
         if(g_gameMode&&g_bearActive){
             ImDrawList*dl=ImGui::GetForegroundDrawList();
             float hudX=10.f, hudY=8.f;
             float barW=220.f, barH=18.f, gap=6.f;
 
             // ── HP 血條（紅色）──
-            float hpFrac=glm::clamp(g_bearHP/1000.f,0.f,1.f);
+            float hpFrac=glm::clamp(g_bearHP/50.f,0.f,1.f);
             dl->AddRectFilled(ImVec2(hudX,hudY),ImVec2(hudX+barW,hudY+barH),IM_COL32(40,12,12,220),4.f);
             ImU32 hpC=(hpFrac>0.5f)?IM_COL32(200,40,40,255):(hpFrac>0.25f)?IM_COL32(220,150,30,255):IM_COL32(220,40,30,255);
             dl->AddRectFilled(ImVec2(hudX,hudY),ImVec2(hudX+barW*hpFrac,hudY+barH),hpC,4.f);
             dl->AddRect(ImVec2(hudX,hudY),ImVec2(hudX+barW,hudY+barH),IM_COL32(200,200,200,180),4.f);
-            char hpBuf[24];snprintf(hpBuf,sizeof(hpBuf),"HP %d / 1000",(int)g_bearHP);
+            char hpBuf[24];snprintf(hpBuf,sizeof(hpBuf),"HP %d / 50",(int)g_bearHP);
             dl->AddText(ImVec2(hudX+6,hudY+2),IM_COL32(255,255,255,240),hpBuf);
 
-            // ── 金幣條（金色）──
-            int money=10000+g_killCount*100;
-            float monY=hudY+barH+gap;
-            float monFrac=glm::clamp(money/50000.f,0.f,1.f); // 5萬為滿條
-            dl->AddRectFilled(ImVec2(hudX,monY),ImVec2(hudX+barW,monY+barH),IM_COL32(30,25,8,220),4.f);
-            dl->AddRectFilled(ImVec2(hudX,monY),ImVec2(hudX+barW*monFrac,monY+barH),IM_COL32(240,195,35,255),4.f);
-            dl->AddRect(ImVec2(hudX,monY),ImVec2(hudX+barW,monY+barH),IM_COL32(200,200,200,180),4.f);
-            char monBuf[24];snprintf(monBuf,sizeof(monBuf),"$ %d",money);
-            dl->AddText(ImVec2(hudX+6,monY+2),IM_COL32(255,255,255,240),monBuf);
-
-            // ── 魔法條（藍色，5000 為一格）──
-            float magY=monY+barH+gap;
-            bool canMagic=(money>=5000);
-            float magFrac=canMagic?1.f:(money%5000)/5000.f;
-            dl->AddRectFilled(ImVec2(hudX,magY),ImVec2(hudX+barW,magY+barH),IM_COL32(10,15,40,220),4.f);
-            dl->AddRectFilled(ImVec2(hudX,magY),ImVec2(hudX+barW*magFrac,magY+barH),
+            // ── MP 魔法條（藍色，滿=500）──
+            float mpY=hudY+barH+gap;
+            float mpFrac=glm::clamp(g_bearMP/50.f,0.f,1.f);
+            bool canMagic=(g_bearMP>=50.f);
+            dl->AddRectFilled(ImVec2(hudX,mpY),ImVec2(hudX+barW,mpY+barH),IM_COL32(10,15,40,220),4.f);
+            dl->AddRectFilled(ImVec2(hudX,mpY),ImVec2(hudX+barW*mpFrac,mpY+barH),
                 canMagic?IM_COL32(60,160,255,255):IM_COL32(40,80,140,200),4.f);
-            dl->AddRect(ImVec2(hudX,magY),ImVec2(hudX+barW,magY+barH),IM_COL32(200,200,200,180),4.f);
-            char magBuf[24];snprintf(magBuf,sizeof(magBuf),"Magic [K] %s",canMagic?"READY":"---");
-            dl->AddText(ImVec2(hudX+6,magY+2),IM_COL32(255,255,255,canMagic?240:120),magBuf);
+            dl->AddRect(ImVec2(hudX,mpY),ImVec2(hudX+barW,mpY+barH),IM_COL32(200,200,200,180),4.f);
+            char mpBuf[24];snprintf(mpBuf,sizeof(mpBuf),"MP %d / 50 [K]",(int)g_bearMP);
+            dl->AddText(ImVec2(hudX+6,mpY+2),IM_COL32(255,255,255,canMagic?240:120),mpBuf);
 
-            // ── 擊殺數（右上角）──
+            // ── 擊殺數 ──
+            float killY=mpY+barH+gap;
             char killBuf[24];snprintf(killBuf,sizeof(killBuf),"Kills: %d",g_killCount);
-            float kw=ImGui::CalcTextSize(killBuf).x;
-            dl->AddText(ImVec2(hudX+barW-kw,hudY+barH*3+gap*3+2),IM_COL32(200,210,230,220),killBuf);}
+            dl->AddText(ImVec2(hudX,killY),IM_COL32(200,210,230,220),killBuf);
+
+            // ── 死亡畫面：墓碑「散戶」──
+            if(g_bearDead){
+                float deadAlpha=std::min(1.f,(float)(glfwGetTime()-g_bearDeadT)/0.5f);
+                ImFont*font=ImGui::GetFont();
+                float fs=ImGui::GetFontSize()*5.f;
+                // 墓碑（灰色大方塊）
+                float tw2=(float)fw, th2=(float)fh;
+                // 半透明黑幕
+                dl->AddRectFilled(ImVec2(0,0),ImVec2(tw2,th2),IM_COL32(0,0,0,(int)(160*deadAlpha)));
+                // 墓碑形狀
+                float gsW=120.f,gsH=160.f;
+                float gsX=(tw2-gsW)*0.5f, gsY=th2*0.25f;
+                dl->AddRectFilled(ImVec2(gsX,gsY),ImVec2(gsX+gsW,gsY+gsH),IM_COL32(120,120,120,(int)(230*deadAlpha)),8.f);
+                dl->AddRectFilled(ImVec2(gsX-15,gsY+gsH),ImVec2(gsX+gsW+15,gsY+gsH+20),IM_COL32(90,90,90,(int)(230*deadAlpha)),4.f);
+                // 頂部弧形
+                dl->AddRectFilled(ImVec2(gsX,gsY-20),ImVec2(gsX+gsW,gsY),IM_COL32(120,120,120,(int)(230*deadAlpha)),30.f);
+                // 「散戶」文字
+                const char*rip="\xe6\x95\xa3\xe6\x88\xb6"; // 散戶
+                float fs2=ImGui::GetFontSize()*3.f;
+                ImVec2 rsz=font->CalcTextSizeA(fs2,FLT_MAX,0.f,rip);
+                float rx=gsX+(gsW-rsz.x)*0.5f, ry=gsY+30.f;
+                dl->AddText(font,fs2,ImVec2(rx,ry),IM_COL32(40,40,40,(int)(255*deadAlpha)),rip);
+                // R.I.P.
+                const char*ripTxt="R.I.P.";
+                ImVec2 rsz2=font->CalcTextSizeA(fs2*0.6f,FLT_MAX,0.f,ripTxt);
+                dl->AddText(font,fs2*0.6f,ImVec2(gsX+(gsW-rsz2.x)*0.5f,ry+rsz.y+10),
+                    IM_COL32(60,60,60,(int)(220*deadAlpha)),ripTxt);
+                // 「再來一局」提示
+                const char*retry="\xe6\x8c\x89 R \xe9\x87\x8d\xe6\x96\xb0\xe9\x96\x8b\xe5\xa7\x8b"; // 按 R 重新開始
+                ImVec2 rsz3=font->CalcTextSizeA(ImGui::GetFontSize()*1.5f,FLT_MAX,0.f,retry);
+                dl->AddText(font,ImGui::GetFontSize()*1.5f,
+                    ImVec2((tw2-rsz3.x)*0.5f,gsY+gsH+60),
+                    IM_COL32(255,255,255,(int)(200*deadAlpha*((sinf((float)glfwGetTime()*3.f)+1.f)*0.5f))),retry);}}
+        } // else (non-MENU)
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -2613,7 +2973,7 @@ int main(){
     mLabel.del();mHoverLine.del();
     mChr0.del();mChr1.del();mChr2.del();mChr3.del();mChr4.del();
     mLeekG.del();mLeekW.del();mLeekD.del();mBoom.del();mTornado.del();
-    mLobR.del();mLobD.del();
+    mLobR.del();mLobD.del();mBoxB.del();mBoxD.del();
     ImGui_ImplOpenGL3_Shutdown();ImGui_ImplGlfw_Shutdown();ImGui::DestroyContext();
     glDeleteProgram(pLit);glDeleteProgram(pFlat);
     glfwTerminate();return 0;}
