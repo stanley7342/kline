@@ -1,0 +1,10 @@
+^C:\USERS\STANLEY\KLINE\BUILD\CMAKEFILES\C7A04FCA9DF38D6BED42B77EA5040E4A\GENERATE.STAMP.RULE
+setlocal
+C:\Users\Stanley\AppData\Local\Python\pythoncore-3.14-64\Lib\site-packages\cmake\data\bin\cmake.exe -SC:/Users/Stanley/kline -BC:/Users/Stanley/kline/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/Stanley/kline/build/KLineGL3D.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

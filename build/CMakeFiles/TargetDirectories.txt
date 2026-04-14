@@ -1,0 +1,3 @@
+C:/Users/Stanley/kline/build/CMakeFiles/KLineGL3D.dir
+C:/Users/Stanley/kline/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/Stanley/kline/build/CMakeFiles/ZERO_CHECK.dir

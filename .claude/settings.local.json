@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.twse.com.tw)",
+      "Bash(cmake --build build --config Release)",
+      "Bash(copy:*)",
+      "Bash(cmake --build \"C:/Users/Stanley/kline/build\" --config Release)",
+      "Bash(cmake --build build --config Release --clean-first)",
+      "Bash(cmake --build . --config Release)",
+      "Bash(cmd.exe /C \"cd C:\\\\\\\\Users\\\\\\\\Stanley\\\\\\\\kline\\\\\\\\build && cmake --build . --config Release 2>&1\")",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(cmd:*)",
+      "Bash(taskkill /F /IM KLineGL3D.exe)",
+      "Bash(python3:*)",
+      "Bash(cmake --build . --config Release -- /t:Rebuild)"
+    ]
+  }
+}
