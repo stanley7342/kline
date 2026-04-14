@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K-Line RPG - 拉拉熊割韭菜</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0d15;overflow:hidden;font-family:'Microsoft JhengHei','Segoe UI',sans-serif}
+canvas{display:block}
+#hud{position:absolute;top:10px;left:10px;color:#fff;pointer-events:none;z-index:10}
+.bar{width:220px;height:20px;background:#2a0c0c;border:1px solid #aaa;border-radius:4px;margin:4px 0;position:relative}
+.bar-fill{height:100%;border-radius:3px;transition:width 0.2s}
+.bar-text{position:absolute;top:1px;left:6px;font-size:13px;text-shadow:1px 1px 2px #000}
+#hp-fill{background:#c82828}
+#mp-fill{background:#3ca0ff}
+#kills{color:#c8d2e6;font-size:14px;margin-top:4px}
+#speech{position:absolute;display:none;background:#fff;border:2px solid #e04030;border-radius:12px;padding:8px 14px;color:#e03020;font-size:22px;font-weight:bold;z-index:20;pointer-events:none}
+#speech::after{content:'';position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#fff}
+#menu{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:#1a1e2e;border:2px solid #887040;border-radius:12px;padding:30px;color:#fff;z-index:100;text-align:center;min-width:420px}
+#menu h1{color:#f0d020;margin-bottom:15px;font-size:28px}
+#menu input{width:100%;padding:8px;font-size:16px;margin:8px 0;border:1px solid #666;border-radius:6px;background:#2a2e3e;color:#fff}
+.stock-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}
+.stock-btn{padding:10px;background:#2a3050;border:1px solid #556;border-radius:6px;color:#dde;cursor:pointer;font-size:13px}
+.stock-btn:hover{background:#3a4070;border-color:#88a}
+.help{text-align:left;color:#8090b0;font-size:13px;margin-top:12px;line-height:1.8}
+.help b{color:#c0d0f0}
+#death{position:absolute;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:none;z-index:200;justify-content:center;align-items:center;flex-direction:column}
+#tombstone{background:#787878;width:140px;height:180px;border-radius:14px 14px 4px 4px;text-align:center;padding-top:30px;position:relative}
+#tombstone::after{content:'';position:absolute;bottom:-16px;left:-16px;right:-16px;height:20px;background:#5a5a5a;border-radius:4px}
+#tombstone h2{color:#333;font-size:36px}
+#tombstone p{color:#444;font-size:16px;margin-top:8px}
+#restart-hint{color:#fff;font-size:20px;margin-top:40px;animation:blink 1s infinite}
+@keyframes blink{0%,100%{opacity:0.3}50%{opacity:1}}
+#girl{position:absolute;display:none;z-index:210;pointer-events:none}
+.girl-bubble{background:#fff0f3;border:2px solid #ff96b4;border-radius:10px;padding:8px 12px;color:#dc3c64;font-size:20px;font-weight:bold;margin-bottom:6px;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="menu">
+  <h1>K-Line RPG</h1>
+  <input id="code-input" type="text" value="2330" placeholder="輸入股票代碼">
+  <div class="stock-grid">
+    <button class="stock-btn" data-code="2330">2330<br>台積電</button>
+    <button class="stock-btn" data-code="0050">0050<br>元大台灣50</button>
+    <button class="stock-btn" data-code="2317">2317<br>鴻海</button>
+    <button class="stock-btn" data-code="2454">2454<br>聯發科</button>
+    <button class="stock-btn" data-code="2881">2881<br>富邦金</button>
+    <button class="stock-btn" data-code="2882">2882<br>國泰金</button>
+    <button class="stock-btn" data-code="2303">2303<br>聯電</button>
+    <button class="stock-btn" data-code="2412">2412<br>中華電</button>
+    <button class="stock-btn" data-code="2002">2002<br>中鋼</button>
+  </div>
+  <div class="help">
+    <b>=== 遊戲玩法 ===</b><br>
+    D = 左移 &nbsp; F = 右移 &nbsp; Space = 跳躍<br>
+    J = 鐮刀攻擊 &nbsp; K = 鈔票魔法 (75 MP)<br>
+    R = 重新開始<br><br>
+    <b>怪物：</b>韭菜 HP100 / 龍蝦 HP300 / 紙箱 HP200
+  </div>
+  <div id="loading" style="display:none;color:#4cf;margin-top:10px">載入中...</div>
+</div>
+
+<div id="hud" style="display:none">
+  <div class="bar"><div id="hp-fill" class="bar-fill" style="width:100%"></div><span class="bar-text" id="hp-text">HP 100/100</span></div>
+  <div class="bar" style="background:#0a0f28"><div id="mp-fill" class="bar-fill" style="width:100%"></div><span class="bar-text" id="mp-text">MP 500/500 [K]</span></div>
+  <div id="kills">Kills: 0</div>
+</div>
+
+<div id="speech"></div>
+
+<div id="death">
+  <div id="tombstone"><h2>散戶</h2><p>R.I.P.</p></div>
+  <div id="restart-hint">按 R 重新開始</div>
+  <div id="girl"><div class="girl-bubble">熊熊記得補錢</div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ============================================================
+//  K-Line RPG Web Version
+// ============================================================
+const W={scene:null,camera:null,renderer:null,candles:[],bear:null};
+let G={
+  hp:100,mp:500,kills:0,dead:false,
+  bearIdx:0,bearX:0,bearY:0,bearFace:-1,
+  jumpT:-9,slashT:-9,hitT:-9,
+  phase:1,prevIdx:0,moveDir:0,
+  ants:[],lobs:[],boxes:[],claws:[],
+  projT:-9,projX:0,projDir:1,
+  kdata:[],sp:0.4,mode:'menu'
+};
+const clock=new THREE.Clock();
+
+// Audio
+const actx=new (window.AudioContext||window.webkitAudioContext)();
+function beep(freq,dur){
+  const o=actx.createOscillator(),g=actx.createGain();
+  o.connect(g);g.connect(actx.destination);
+  o.frequency.value=freq;g.gain.value=0.08;
+  o.start();o.stop(actx.currentTime+dur/1000);
+}
+function sfxSlash(){beep(800,60);setTimeout(()=>beep(1200,40),60)}
+function sfxKill(){beep(1400,30);setTimeout(()=>beep(1800,30),30);setTimeout(()=>beep(2200,40),60)}
+function sfxHit(){beep(300,50)}
+function sfxJump(){beep(600,30);setTimeout(()=>beep(900,30),30)}
+function sfxBearHit(){beep(200,80)}
+
+// Fetch stock data via CORS proxy
+async function fetchStock(code){
+  document.getElementById('loading').style.display='block';
+  try{
+    // Try allorigins CORS proxy for Yahoo Finance
+    const url=`https://query1.finance.yahoo.com/v8/finance/chart/${code}.TW?interval=1d&range=1y`;
+    const proxy=`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const r=await fetch(proxy);
+    const j=await r.json();
+    const res=j.chart.result[0];
+    const ts=res.timestamp;
+    const q=res.indicators.quote[0];
+    const data=[];
+    for(let i=0;i<ts.length;i++){
+      if(q.open[i]&&q.close[i])
+        data.push({o:q.open[i],h:q.high[i],l:q.low[i],c:q.close[i],v:(q.volume[i]||0)/1e6});
+    }
+    if(data.length<5){
+      // Try TWO suffix
+      const url2=`https://query1.finance.yahoo.com/v8/finance/chart/${code}.TWO?interval=1d&range=1y`;
+      const proxy2=`https://api.allorigins.win/raw?url=${encodeURIComponent(url2)}`;
+      const r2=await fetch(proxy2);const j2=await r2.json();
+      const res2=j2.chart.result[0];const q2=res2.indicators.quote[0];
+      for(let i=0;i<res2.timestamp.length;i++){
+        if(q2.open[i]&&q2.close[i])
+          data.push({o:q2.open[i],h:q2.high[i],l:q2.low[i],c:q2.close[i],v:(q2.volume[i]||0)/1e6});
+      }
+    }
+    return data;
+  }catch(e){
+    console.error(e);
+    // Fallback: generate random data
+    const data=[];let p=100;
+    for(let i=0;i<200;i++){
+      const c=p*(1+(Math.random()-0.48)*0.04);
+      const h=Math.max(p,c)*(1+Math.random()*0.02);
+      const l=Math.min(p,c)*(1-Math.random()*0.02);
+      data.push({o:p,h,l,c,v:Math.random()*100});p=c;
+    }
+    return data;
+  }finally{document.getElementById('loading').style.display='none'}
+}
+
+function initScene(){
+  W.scene=new THREE.Scene();
+  W.scene.background=new THREE.Color(0x0a0d15);
+  W.camera=new THREE.PerspectiveCamera(45,innerWidth/innerHeight,0.1,500);
+  W.renderer=new THREE.WebGLRenderer({antialias:true});
+  W.renderer.setSize(innerWidth,innerHeight);
+  W.renderer.setPixelRatio(devicePixelRatio);
+  document.body.appendChild(W.renderer.domElement);
+  // Lights
+  const amb=new THREE.AmbientLight(0x404060,0.6);W.scene.add(amb);
+  const dir=new THREE.DirectionalLight(0xffffff,0.8);
+  dir.position.set(8,20,12);W.scene.add(dir);
+  window.addEventListener('resize',()=>{
+    W.camera.aspect=innerWidth/innerHeight;
+    W.camera.updateProjectionMatrix();
+    W.renderer.setSize(innerWidth,innerHeight);
+  });
+}
+
+function buildChart(data){
+  // Clear old
+  while(W.scene.children.length>2)W.scene.remove(W.scene.children[2]);
+  W.candles=[];
+  G.kdata=data;
+  const n=data.length;
+  G.sp=Math.min(1.6,50/Math.max(1,n));
+  const pMin=Math.min(...data.map(d=>d.l))*0.98;
+  const pMax=Math.max(...data.map(d=>d.h))*1.02;
+  const toY=p=>(p-pMin)/(pMax-pMin)*12+10;
+  G.toY=toY;G.pMin=pMin;G.pMax=pMax;
+
+  const bHW=G.sp*0.32,wHW=G.sp*0.05;
+  for(let i=0;i<n;i++){
+    const d=data[i];const bull=d.c>=d.o;
+    const blo=toY(Math.min(d.o,d.c)),bhi=toY(Math.max(d.o,d.c));
+    const wh=toY(d.h),wl=toY(d.l);
+    const color=bull?0xe03838:0x28d868;
+    // Body
+    const bH=Math.max(bhi-blo,0.04);
+    const geo=new THREE.BoxGeometry(bHW*2,bH,bHW*2);
+    const mat=new THREE.MeshPhongMaterial({color});
+    const mesh=new THREE.Mesh(geo,mat);
+    mesh.position.set(i*G.sp,blo+bH/2,0);
+    W.scene.add(mesh);
+    // Wick
+    if(wh>bhi+0.01){
+      const wG=new THREE.BoxGeometry(wHW*2,wh-bhi,wHW*2);
+      const wM=new THREE.Mesh(wG,mat);
+      wM.position.set(i*G.sp,(bhi+wh)/2,0);W.scene.add(wM);
+    }
+    if(wl<blo-0.01){
+      const wG2=new THREE.BoxGeometry(wHW*2,blo-wl,wHW*2);
+      const wM2=new THREE.Mesh(wG2,mat);
+      wM2.position.set(i*G.sp,(wl+blo)/2,0);W.scene.add(wM2);
+    }
+    W.candles.push({x:i*G.sp,top:toY(d.h),d});
+  }
+  // Grid
+  const gridMat=new THREE.LineBasicMaterial({color:0x2a3048});
+  for(let y=10;y<=22;y+=2){
+    const pts=[new THREE.Vector3(-G.sp,y,0),new THREE.Vector3(n*G.sp,y,0)];
+    const g=new THREE.BufferGeometry().setFromPoints(pts);
+    W.scene.add(new THREE.Line(g,gridMat));
+  }
+  // Camera
+  const midX=(n-1)*G.sp*0.5;
+  W.camera.position.set(midX,16,Math.max(n*G.sp*0.55+10,25));
+  W.camera.lookAt(midX,16,0);
+
+  // Init bear position
+  G.bearIdx=Math.floor(n/2);G.prevIdx=G.bearIdx;
+  G.bearX=G.bearIdx*G.sp;
+  G.bearY=W.candles[G.bearIdx]?W.candles[G.bearIdx].top:16;
+}
+
+// Bear (simple box character)
+function createBear(){
+  const g=new THREE.Group();
+  // Body
+  const body=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.6,0.4),new THREE.MeshPhongMaterial({color:0xbd8a56}));
+  body.position.y=0.3;g.add(body);
+  // Head
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.4,12,12),new THREE.MeshPhongMaterial({color:0xbd8a56}));
+  head.position.y=0.95;g.add(head);
+  // Eyes
+  const eyeG=new THREE.SphereGeometry(0.06,8,8);
+  const eyeM=new THREE.MeshPhongMaterial({color:0x1a0e06});
+  const el=new THREE.Mesh(eyeG,eyeM);el.position.set(-0.14,1.0,0.32);g.add(el);
+  const er=new THREE.Mesh(eyeG,eyeM);er.position.set(0.14,1.0,0.32);g.add(er);
+  // Nose
+  const nose=new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8),eyeM);
+  nose.position.set(0,0.88,0.36);g.add(nose);
+  // Ears
+  const earG=new THREE.SphereGeometry(0.14,8,8);
+  const earM=new THREE.MeshPhongMaterial({color:0xbd8a56});
+  const earL=new THREE.Mesh(earG,earM);earL.position.set(-0.3,1.25,0);g.add(earL);
+  const earR=new THREE.Mesh(earG,earM);earR.position.set(0.3,1.25,0);g.add(earR);
+  // Scythe (child group, toggled on attack)
+  const scythe=new THREE.Group();
+  const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,1.2),new THREE.MeshPhongMaterial({color:0x5a3a1a}));
+  handle.position.y=0.6;scythe.add(handle);
+  const blade=new THREE.Mesh(new THREE.TorusGeometry(0.35,0.03,8,16,Math.PI*0.7),new THREE.MeshPhongMaterial({color:0xd0d4dc}));
+  blade.position.set(0.1,1.15,0);blade.rotation.z=0.5;scythe.add(blade);
+  scythe.position.set(0.4,0.3,0);scythe.visible=false;
+  g.add(scythe);g.userData.scythe=scythe;
+  W.scene.add(g);
+  return g;
+}
+
+// Monster factory
+function createMonster(type,x,y){
+  const g=new THREE.Group();
+  if(type==='leek'){
+    // Green stalk
+    const stalk=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.1,0.7),new THREE.MeshPhongMaterial({color:0x38a030}));
+    stalk.position.y=0.35;g.add(stalk);
+    // Leaves
+    for(let i=0;i<3;i++){
+      const leaf=new THREE.Mesh(new THREE.BoxGeometry(0.06,0.4,0.02),new THREE.MeshPhongMaterial({color:0x2a8020}));
+      leaf.position.set((i-1)*0.1,0.8,0);leaf.rotation.z=(i-1)*0.3;g.add(leaf);
+    }
+    // Root
+    const root=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.06,0.15),new THREE.MeshPhongMaterial({color:0xeee8d8}));
+    root.position.y=0.07;g.add(root);
+    // Face
+    const face=new THREE.Mesh(new THREE.CircleGeometry(0.08,12),new THREE.MeshPhongMaterial({color:0xeee8d8,side:THREE.DoubleSide}));
+    face.position.set(0,0.45,0.09);g.add(face);
+    const eye1=new THREE.Mesh(new THREE.CircleGeometry(0.02,8),new THREE.MeshBasicMaterial({color:0x111}));
+    eye1.position.set(-0.03,0.48,0.1);g.add(eye1);
+    const eye2=eye1.clone();eye2.position.x=0.03;g.add(eye2);
+  }else if(type==='lobster'){
+    const bodyM=new THREE.MeshPhongMaterial({color:0xd82820});
+    const body2=new THREE.Mesh(new THREE.SphereGeometry(0.25,10,8),bodyM);g.add(body2);
+    // Claws
+    for(let s=-1;s<=1;s+=2){
+      const claw=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.08,0.06),bodyM);
+      claw.position.set(s*0.4,0,0);g.add(claw);
+    }
+    // Eyes
+    const eyeM2=new THREE.MeshBasicMaterial({color:0x111});
+    const e1=new THREE.Mesh(new THREE.SphereGeometry(0.04,6,6),eyeM2);e1.position.set(-0.1,0.15,0.2);g.add(e1);
+    const e2=e1.clone();e2.position.x=0.1;g.add(e2);
+  }else if(type==='box'){
+    const boxM=new THREE.MeshPhongMaterial({color:0xb89460});
+    const bx=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.65,0.5),boxM);
+    bx.position.y=0.32;g.add(bx);
+    // Tape
+    const tapeM=new THREE.MeshBasicMaterial({color:0x3a2810});
+    const t1=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.65,0.52),tapeM);t1.position.y=0.32;g.add(t1);
+    const t2=new THREE.Mesh(new THREE.BoxGeometry(0.62,0.04,0.52),tapeM);t2.position.y=0.32;g.add(t2);
+    // Sad face
+    const eyeM3=new THREE.MeshBasicMaterial({color:0x2a1a0a});
+    const fe1=new THREE.Mesh(new THREE.CircleGeometry(0.04,8),eyeM3);fe1.position.set(-0.12,0.42,0.26);g.add(fe1);
+    const fe2=fe1.clone();fe2.position.x=0.12;g.add(fe2);
+    // Sad mouth
+    const mouth=new THREE.Mesh(new THREE.RingGeometry(0.06,0.08,12,1,Math.PI,Math.PI),eyeM3);
+    mouth.position.set(0,0.22,0.26);g.add(mouth);
+  }
+  g.position.set(x,y,0);
+  g.userData={type,hp:type==='leek'?100:type==='lobster'?300:200,alive:true,spawnT:clock.getElapsedTime(),x,y,lastHitT:-9};
+  W.scene.add(g);
+  return g;
+}
+
+// Projectile (claw or cash)
+function createProj(type,x,y,vx,vy){
+  const color=type==='claw'?0xd82020:0x40b830;
+  const m=new THREE.Mesh(new THREE.SphereGeometry(0.12,6,6),new THREE.MeshPhongMaterial({color}));
+  m.position.set(x,y,0.5);
+  m.userData={type,vx,vy,alive:true,spawnT:clock.getElapsedTime()};
+  W.scene.add(m);
+  return m;
+}
+
+// Game state
+let monsters=[];let projs=[];
+
+function spawnMonsters(){
+  const t=clock.getElapsedTime();
+  const n=G.kdata.length;
+  // Leeks
+  const leekCount=monsters.filter(m=>m.userData.type==='leek'&&m.userData.alive).length;
+  if(leekCount<10+Math.floor(Math.random()*11)){
+    const idx=Math.floor(Math.random()*n);
+    const c=W.candles[idx];if(c)monsters.push(createMonster('leek',c.x,c.top+0.02));
+  }
+  // Lobsters
+  const lobCount=monsters.filter(m=>m.userData.type==='lobster'&&m.userData.alive).length;
+  if(lobCount<3&&Math.random()<0.01){
+    const idx=Math.floor(Math.random()*n);
+    const c=W.candles[idx];if(c)monsters.push(createMonster('lobster',c.x,c.top+2+Math.random()*2));
+  }
+  // Boxes
+  const boxCount=monsters.filter(m=>m.userData.type==='box'&&m.userData.alive).length;
+  if(boxCount<4&&Math.random()<0.005){
+    const idx=Math.floor(Math.random()*n);
+    const c=W.candles[idx];if(c)monsters.push(createMonster('box',c.x,c.top+0.02));
+  }
+}
+
+function updateGame(dt){
+  if(G.mode!=='play'||G.dead)return;
+  const t=clock.getElapsedTime();
+  const n=G.kdata.length;
+
+  // Bear movement
+  if(G.phase<1){
+    G.phase+=dt/0.3;
+    if(G.phase>=1)G.phase=1;
+    const e=G.phase*G.phase*(3-2*G.phase);
+    G.bearX=G.prevIdx*G.sp+(G.bearIdx*G.sp-G.prevIdx*G.sp)*e;
+    const fromY=W.candles[G.prevIdx]?W.candles[G.prevIdx].top:16;
+    const toY2=W.candles[G.bearIdx]?W.candles[G.bearIdx].top:16;
+    G.bearY=fromY+(toY2-fromY)*e;
+  }
+  if(G.phase>=1&&G.moveDir!==0){
+    G.prevIdx=G.bearIdx;
+    G.bearIdx=Math.max(0,Math.min(n-1,G.bearIdx+G.moveDir*10));
+    G.moveDir=0;G.phase=0;
+  }
+
+  // Jump
+  let jumpArc=0;
+  const jumpE=t-G.jumpT;
+  if(jumpE>=0&&jumpE<0.55)jumpArc=Math.sin(jumpE/0.55*Math.PI)*3.5;
+
+  // Bear position
+  if(W.bear){
+    const cy=W.candles[G.bearIdx]?W.candles[G.bearIdx].top:16;
+    W.bear.position.set(G.bearX,G.bearY+jumpArc+0.02,0);
+    // Slash animation
+    const se=t-G.slashT;
+    W.bear.userData.scythe.visible=(se>=0&&se<0.45);
+    if(se>=0&&se<0.45)W.bear.userData.scythe.rotation.z=Math.sin(se/0.45*Math.PI)*1.5;
+    // Hit recoil
+    const he=t-G.hitT;
+    if(he>=0&&he<0.5)W.bear.position.x+=Math.sin(he/0.5*Math.PI)*0.3*(G.bearFace||1);
+  }
+
+  // Spawn
+  if(Math.random()<0.05)spawnMonsters();
+
+  // Monster movement + attack
+  monsters.forEach(m=>{
+    if(!m.userData.alive)return;
+    const dx=G.bearX-m.userData.x;
+    const spd=m.userData.type==='leek'?G.sp:m.userData.type==='box'?G.sp*2:G.sp*3;
+    if(m.userData.type==='lobster'){
+      // Flying lobster
+      if(Math.random()<0.01)m.userData.flyAng=Math.atan2((G.bearY+1)-m.userData.y,dx);
+      const ang=m.userData.flyAng||0;
+      m.userData.x+=Math.cos(ang)*spd*dt;
+      m.userData.y+=Math.sin(ang)*spd*dt*0.5;
+      const ci=Math.max(0,Math.min(n-1,Math.round(m.userData.x/G.sp)));
+      const minY=W.candles[ci]?W.candles[ci].top+1:17;
+      m.userData.y=Math.max(minY,Math.min(24,m.userData.y));
+      // Throw claw
+      if(t-m.userData.lastHitT>2){
+        m.userData.lastHitT=t;
+        const d=Math.sqrt(dx*dx+(G.bearY-m.userData.y)**2);
+        if(d>0.1){
+          const s=G.sp*40;
+          projs.push(createProj('claw',m.userData.x,m.userData.y,dx/d*s,(G.bearY-m.userData.y)/d*s));
+        }
+      }
+    }else{
+      m.userData.x+=Math.sign(dx)*spd*dt;
+      const ci2=Math.max(0,Math.min(n-1,Math.round(m.userData.x/G.sp)));
+      m.userData.y=W.candles[ci2]?W.candles[ci2].top+0.02:16;
+    }
+    m.position.set(m.userData.x,m.userData.y,0);
+    m.rotation.y+=dt*2; // Wobble
+    // Attack bear
+    const dist=Math.sqrt((m.userData.x-G.bearX)**2+(m.userData.y-(G.bearY+jumpArc))**2);
+    if(dist<G.sp*0.8&&t-G.hitT>0.8){
+      const dmg=5+Math.floor(Math.random()*11);
+      G.hp-=dmg;G.hitT=t;sfxBearHit();
+      if(G.hp<=0){G.hp=0;G.dead=true;showDeath();}
+      updateHUD();
+    }
+  });
+
+  // Slash damage
+  const slashE=t-G.slashT;
+  if(slashE>=0.12&&slashE<0.32){
+    monsters.forEach(m=>{
+      if(!m.userData.alive)return;
+      const d=Math.sqrt((m.userData.x-G.bearX)**2+(m.userData.y-(G.bearY+jumpArc))**2);
+      if(d<G.sp*10&&t-m.userData.lastHitT>0.35){
+        const dmg=60+Math.floor(Math.random()*31);
+        m.userData.hp-=dmg;m.userData.lastHitT=t;
+        if(m.userData.hp<=0){m.userData.alive=false;G.kills++;G.mp=Math.min(500,G.mp+10);sfxKill();
+          setTimeout(()=>{W.scene.remove(m)},300);
+        }else sfxHit();
+        updateHUD();
+      }
+    });
+  }
+
+  // Projectiles
+  projs.forEach(p=>{
+    if(!p.userData.alive)return;
+    p.position.x+=p.userData.vx*dt;
+    p.position.y+=p.userData.vy*dt;
+    p.rotation.z+=dt*12;
+    const d=Math.sqrt((p.position.x-G.bearX)**2+(p.position.y-(G.bearY+jumpArc))**2);
+    if(d<G.sp*0.8){
+      p.userData.alive=false;W.scene.remove(p);
+      if(t-G.hitT>0.3){G.hp-=5+Math.floor(Math.random()*11);G.hitT=t;sfxBearHit();
+        if(G.hp<=0){G.hp=0;G.dead=true;showDeath();}updateHUD();}
+    }
+    if(t-p.userData.spawnT>3){p.userData.alive=false;W.scene.remove(p);}
+  });
+  projs=projs.filter(p=>p.userData.alive);
+  monsters=monsters.filter(m=>m.userData.alive||clock.getElapsedTime()-m.userData.spawnT<99);
+}
+
+function updateHUD(){
+  document.getElementById('hp-fill').style.width=Math.max(0,G.hp/100*100)+'%';
+  document.getElementById('hp-text').textContent=`HP ${Math.floor(G.hp)} / 100`;
+  document.getElementById('mp-fill').style.width=Math.max(0,G.mp/500*100)+'%';
+  document.getElementById('mp-text').textContent=`MP ${Math.floor(G.mp)} / 500 [K]`;
+  document.getElementById('kills').textContent=`Kills: ${G.kills}`;
+}
+
+function showSpeech(txt,dur=1000){
+  const el=document.getElementById('speech');
+  el.textContent=txt;el.style.display='block';
+  // Position above bear (approximate)
+  const v=new THREE.Vector3(G.bearX,G.bearY+2.5,0).project(W.camera);
+  el.style.left=((v.x+1)/2*innerWidth-el.offsetWidth/2)+'px';
+  el.style.top=((1-v.y)/2*innerHeight-60)+'px';
+  setTimeout(()=>el.style.display='none',dur);
+}
+
+function showDeath(){
+  document.getElementById('death').style.display='flex';
+  setTimeout(()=>{document.getElementById('girl').style.display='block';
+    document.getElementById('girl').style.right='20%';document.getElementById('girl').style.top='40%';},1000);
+}
+
+function restart(){
+  G.hp=100;G.mp=500;G.kills=0;G.dead=false;G.hitT=-9;
+  monsters.forEach(m=>W.scene.remove(m));monsters=[];
+  projs.forEach(p=>W.scene.remove(p));projs=[];
+  document.getElementById('death').style.display='none';
+  document.getElementById('girl').style.display='none';
+  updateHUD();
+}
+
+// Input
+const keys={};
+document.addEventListener('keydown',e=>{
+  if(keys[e.code])return;keys[e.code]=true;
+  if(G.mode==='menu'){
+    if(e.code==='Enter')startGame(document.getElementById('code-input').value);
+    return;
+  }
+  if(G.dead&&e.code==='KeyR'){restart();return;}
+  if(G.dead)return;
+  const t=clock.getElapsedTime();
+  if(e.code==='KeyD'){G.moveDir=-1;G.bearFace=-1;sfxJump();}
+  if(e.code==='KeyF'){G.moveDir=1;G.bearFace=1;sfxJump();}
+  if(e.code==='Space'&&t-G.jumpT>0.6){G.jumpT=t;sfxJump();}
+  if(e.code==='KeyJ'){G.slashT=t;sfxSlash();showSpeech('割韭菜！');}
+  if(e.code==='KeyK'&&G.mp>=75){
+    G.mp-=75;G.projT=t;G.projX=G.bearX;G.projDir=G.bearFace||1;
+    // Hit 5 monsters in facing direction
+    let hits=0;
+    monsters.forEach(m=>{
+      if(!m.userData.alive||hits>=5)return;
+      const dx=m.userData.x-G.bearX;
+      if(G.projDir>0?dx>0:dx<0){
+        m.userData.hp-=25+Math.floor(Math.random()*21);m.userData.lastHitT=t;
+        if(m.userData.hp<=0){m.userData.alive=false;G.kills++;G.mp=Math.min(500,G.mp+10);sfxKill();
+          setTimeout(()=>W.scene.remove(m),300);}
+        hits++;
+      }
+    });
+    showSpeech('本多終勝',1500);
+    updateHUD();
+  }
+  if(e.code==='KeyR')restart();
+});
+document.addEventListener('keyup',e=>keys[e.code]=false);
+
+// Start game
+async function startGame(code){
+  if(!code)code='2330';
+  const data=await fetchStock(code);
+  if(!data||data.length<5){alert('載入失敗');return;}
+  document.getElementById('menu').style.display='none';
+  document.getElementById('hud').style.display='block';
+  G.mode='play';G.kdata=data;
+  buildChart(data);
+  W.bear=createBear();
+  updateHUD();
+}
+
+// Stock buttons
+document.querySelectorAll('.stock-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.getElementById('code-input').value=btn.dataset.code;
+    startGame(btn.dataset.code);
+  });
+});
+document.getElementById('code-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter')startGame(e.target.value);
+});
+
+// Main loop
+initScene();
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),0.05);
+  updateGame(dt);
+  W.renderer.render(W.scene,W.camera);
+}
+animate();
+</script>
+</body>
+</html>
