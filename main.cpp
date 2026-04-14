@@ -2156,6 +2156,9 @@ void onKey(GLFWwindow*,int k,int sc,int a,int mod){
         if(i!=g_tf){g_tf=i;g_visible=tfMaxVis(i);g_playing=false;g_panOffset=0;g_dirty=true;}}
     // 空白鍵在遊戲模式=跳躍，非遊戲模式不做事（不回放）
     if(k==GLFW_KEY_SPACE && !g_gameMode){}
+#ifdef __EMSCRIPTEN__
+    if(k==GLFW_KEY_R&&!g_gameMode){emscripten_run_script("location.reload()");return;}
+#endif
     if(k==GLFW_KEY_R){g_visible=0;g_playing=false;g_dirty=true;}
     if(k==GLFW_KEY_RIGHT&&!g_playing&&g_visible<g_tfs[g_tf].cnt){g_visible++;g_dirty=true;}
     if(k==GLFW_KEY_LEFT&&!g_playing&&g_visible>0){g_visible--;g_dirty=true;}
@@ -2328,7 +2331,9 @@ int main(){
     if(!loaded&&GetFileAttributesA("C:/Windows/Fonts/segoeui.ttf")!=INVALID_FILE_ATTRIBUTES)
         io.Fonts->AddFontFromFileTTF("C:/Windows/Fonts/segoeui.ttf",15.f);}
 #else
-    (void)ranges;}
+    // Emscripten: 載入預打包的 Noto Sans TC 字型
+    io.Fonts->AddFontFromFileTTF("/assets/NotoSansTC-Regular.otf",16.f,nullptr,ranges);
+    }
 #endif
     ImGui_ImplGlfw_InitForOpenGL(g_win,false);
 #ifdef __EMSCRIPTEN__
