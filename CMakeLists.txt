@@ -48,6 +48,11 @@ if(MSVC)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "C:/vcpkg/installed/x64-windows/bin/glfw3.dll"
             "${DEPLOY}/glfw3.dll"
+        # ── 複製 assets ──
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${DEPLOY}/assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "${DEPLOY}/assets"
         # ── 自動啟動新版本 ──
         COMMAND cmd /C "start \"\" \"${DEPLOY}/KLineGL3D.exe\""
         COMMENT "打包到 ${DEPLOY} 並啟動"

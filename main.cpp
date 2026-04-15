@@ -42,6 +42,9 @@
 #include <ctime>
 #include <fstream>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 static const int WIN_W=1280,WIN_H=720;
 static const int PANEL_W=290;   // ImGui panel width (px)
 // 版面區間（動態，由 recalcLayout() 更新）
@@ -640,6 +643,66 @@ oC=vec4((0.22+d+s)*uCol,1.);})";
 static const char* VS_FLAT= _GV R"(layout(location=0)in vec3 aP;uniform mat4 uMVP;
 void main(){gl_Position=uMVP*vec4(aP,1);})";
 static const char* FS_FLAT= _GV R"(uniform vec3 uCol;out vec4 oC;void main(){oC=vec4(uCol,1);})";
+
+// Billboard textured sprite shader
+static const char* VS_TEX= _GV R"(layout(location=0)in vec3 aP;layout(location=1)in vec2 aUV;
+uniform mat4 uMVP;out vec2 vUV;
+void main(){vUV=aUV;gl_Position=uMVP*vec4(aP,1);})";
+static const char* FS_TEX= _GV R"(in vec2 vUV;uniform sampler2D uTex;out vec4 oC;
+void main(){oC=texture(uTex,vUV);if(oC.a<0.1)discard;})";
+
+static GLuint g_pTex=0; // textured shader program
+
+// Texture loading
+static GLuint loadTexture(const char*path){
+    int w,h,ch;
+    unsigned char*data=stbi_load(path,&w,&h,&ch,4);
+    if(!data){std::cerr<<"Failed to load: "<<path<<"\n";return 0;}
+    GLuint tex;glGenTextures(1,&tex);glBindTexture(GL_TEXTURE_2D,tex);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,w,h,0,GL_RGBA,GL_UNSIGNED_BYTE,data);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    stbi_image_free(data);return tex;}
+
+// Sprite textures
+static GLuint g_texBear=0,g_texLeek=0,g_texLobster=0,g_texBox=0;
+static GLuint g_texScythe=0,g_texGirl=0,g_texMoney=0,g_texClaw=0;
+
+// Billboard VAO (reusable quad)
+static GLuint g_bbVAO=0,g_bbVBO=0;
+static void initBillboard(){
+    glGenVertexArrays(1,&g_bbVAO);glGenBuffers(1,&g_bbVBO);
+    glBindVertexArray(g_bbVAO);glBindBuffer(GL_ARRAY_BUFFER,g_bbVBO);
+    float quad[]={
+        -0.5f,0.f,0.f, 0.f,1.f,  0.5f,0.f,0.f, 1.f,1.f,
+         0.5f,1.f,0.f, 1.f,0.f, -0.5f,0.f,0.f, 0.f,1.f,
+         0.5f,1.f,0.f, 1.f,0.f, -0.5f,1.f,0.f, 0.f,0.f};
+    glBufferData(GL_ARRAY_BUFFER,sizeof(quad),quad,GL_STATIC_DRAW);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,20,0);glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,20,(void*)12);glEnableVertexAttribArray(1);
+    glBindVertexArray(0);}
+
+// Draw a billboard sprite at world position (wx,wy) with size (sw,sh)
+static void drawSprite(GLuint tex,float wx,float wy,float sw,float sh,const glm::mat4&MVP,const glm::mat4&view){
+    if(!tex)return;
+    glUseProgram(g_pTex);
+    // Billboard: extract camera right and up from view matrix
+    glm::vec3 right(view[0][0],view[1][0],view[2][0]);
+    glm::vec3 up(0,1,0); // keep upright
+    glm::vec3 pos(wx,wy,0);
+    // Build model matrix for billboard
+    glm::mat4 model(1.f);
+    model[0]=glm::vec4(right*sw,0);
+    model[1]=glm::vec4(up*sh,0);
+    model[2]=glm::vec4(glm::cross(right,up),0);
+    model[3]=glm::vec4(pos,1);
+    glm::mat4 mvp=MVP*model;
+    glUniformMatrix4fv(glGetUniformLocation(g_pTex,"uMVP"),1,GL_FALSE,glm::value_ptr(mvp));
+    glActiveTexture(GL_TEXTURE0);glBindTexture(GL_TEXTURE_2D,tex);
+    glUniform1i(glGetUniformLocation(g_pTex,"uTex"),0);
+    glBindVertexArray(g_bbVAO);glDrawArrays(GL_TRIANGLES,0,6);glBindVertexArray(0);}
 
 static GLuint cSh(GLenum t,const char*s){
     GLuint sh=glCreateShader(t);glShaderSource(sh,1,&s,nullptr);glCompileShader(sh);
@@ -1775,9 +1838,9 @@ static void drawStockMenu(int fw,int fh){
 
     // 標題
     ImGui::PushStyleColor(ImGuiCol_Text,ImVec4(.95f,.82f,.20f,1.f));
-    float titleW=ImGui::CalcTextSize("K-Line RPG").x;
+    float titleW=ImGui::CalcTextSize("割韭菜無雙").x;
     ImGui::SetCursorPosX((menuW-titleW)*0.5f);
-    ImGui::Text("K-Line RPG");
+    ImGui::Text("割韭菜無雙");
     ImGui::PopStyleColor();
     ImGui::Separator();
     ImGui::Spacing();
@@ -2253,7 +2316,7 @@ int main(){
     glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_CORE_PROFILE);
 #endif
     glfwWindowHint(GLFW_SAMPLES,4);
-    g_win=glfwCreateWindow(1280,800,"K-Line RPG",nullptr,nullptr);
+    g_win=glfwCreateWindow(1280,800,"割韭菜無雙",nullptr,nullptr);
 #ifndef __EMSCRIPTEN__
     if(g_win)glfwMaximizeWindow(g_win);
 #endif
@@ -2345,6 +2408,14 @@ int main(){
     g_pLit=mkP(VS_LIT,FS_LIT);g_pFlat=mkP(VS_FLAT,FS_FLAT);
     mLabel.init();mHoverLine.init();
     mChr0.init();mChr1.init();mChr2.init();mChr3.init();mChr4.init();
+    // Sprite textures + billboard
+    g_pTex=mkP(VS_TEX,FS_TEX);initBillboard();
+    g_texBear=loadTexture("assets/bear.png");
+    g_texLeek=loadTexture("assets/leek.png");
+    g_texLobster=loadTexture("assets/lobster.png");
+    g_texBox=loadTexture("assets/box.png");
+    g_texScythe=loadTexture("assets/scythe.png");
+    g_texClaw=loadTexture("assets/claw.png");
     mLeekG.init();mLeekW.init();mLeekD.init();mBoom.init();mTornado.init();
     mLobR.init();mLobD.init();mBoxB.init();mBoxD.init();mClaw.init();
     initHardcoded0050(); // 備用資料
@@ -2626,10 +2697,14 @@ static void mainLoopBody(){
                                     float py=leekY+sc*0.4f+sinf(ang)*expand*0.7f-gravity;
                                     float pz=sinf(ang+1.f)*expand*0.3f;
                                     pushBox(boomV,px-pSz,px+pSz,py-pSz,py+pSz,pz-pSz,pz+pSz);}}}}
-                    mLeekG.upload(lkG);mLeekW.upload(lkW);mLeekD.upload(lkD);
-                    uV3(g_pLit,"uCol",{.22f,.62f,.18f});mLeekG.draw(); // 深綠
-                    uV3(g_pLit,"uCol",{.92f,.90f,.84f});mLeekW.draw(); // 白/奶
-                    uV3(g_pLit,"uCol",{.12f,.10f,.08f});mLeekD.draw(); // 深色(眼/嘴)
+                    // 韭菜用 sprite 渲染
+                    glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                    for(auto&a:g_ants){
+                        if(!a.alive)continue;
+                        int bi4=glm::clamp((int)std::round(a.x/g_sp),0,bn-1);
+                        float ly=toW(bd[bi4].h)+sc*0.02f;
+                        drawSprite(g_texLeek,a.x,ly,sc*0.8f,sc*1.6f,MVP,view);}
+                    glDisable(GL_BLEND);
                     // 爆炸粒子（亮綠色閃光）
                     if(!boomV.empty()){
                         mBoom.upload(boomV);
@@ -2860,9 +2935,16 @@ static void mainLoopBody(){
                              hpBars.push_back({(sp3.x+1.f)*0.5f*(float)vw,
                                                (1.f-sp3.y)*0.5f*(float)fh,
                                                lb.hp/300.f});}}
-                     mLobR.upload(lobR);mLobD.upload(lobD);
-                     uV3(g_pLit,"uCol",{.85f,.18f,.12f});mLobR.draw(); // 紅色龍蝦
-                     uV3(g_pLit,"uCol",{.10f,.08f,.06f});mLobD.draw();} // 深色(眼/觸角)
+                     // 龍蝦用 sprite
+                     glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                     for(auto&lb:g_lobs){
+                         if(!lb.alive)continue;
+                         drawSprite(g_texLobster,lb.x,lb.y-sc*0.3f,sc*1.6f,sc*1.2f,MVP,view);}
+                     // 螯投射物用 sprite
+                     for(auto&cp:g_claws){
+                         if(!cp.alive)continue;
+                         drawSprite(g_texClaw,cp.x,cp.y-sc*0.15f,sc*0.5f,sc*0.5f,MVP,view);}
+                     glDisable(GL_BLEND);}
 
                     // ── 紙箱怪物生成 & 移動 & 傷害 ──────────────────
                     {int boxAlive=0;
@@ -2923,9 +3005,14 @@ static void mainLoopBody(){
                              hpBars.push_back({(sp6.x+1.f)*0.5f*(float)vw,
                                                (1.f-sp6.y)*0.5f*(float)fh,
                                                bm.hp/200.f});}}
-                     mBoxB.upload(boxB);mBoxD.upload(boxDk);
-                     uV3(g_pLit,"uCol",{.72f,.58f,.38f});mBoxB.draw(); // 紙箱色
-                     uV3(g_pLit,"uCol",{.18f,.14f,.10f});mBoxD.draw();} // 深色
+                     // 紙箱用 sprite
+                     glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                     for(auto&bm:g_boxes){
+                         if(!bm.alive)continue;
+                         int bi5=glm::clamp((int)std::round(bm.x/g_sp),0,bn-1);
+                         float by5=toW(bd[bi5].h)+sc*0.02f;
+                         drawSprite(g_texBox,bm.x,by5,sc*1.8f,sc*1.8f,MVP,view);}
+                     glDisable(GL_BLEND);}
 
                     // 存血條資料供 ImGui 繪製
                     g_hpBars.clear();
@@ -2934,58 +3021,36 @@ static void mainLoopBody(){
                     // 計算揮劍 slashT
                     float slashT3=(slashElapsed<0.f)?0.f:std::min(1.f,slashElapsed/0.45f);
 
-                    // ── 渲染拉拉熊 ──────────────────────────────
-                    std::vector<float>c0,c1,c2,c3,c4;
-                    if(g_bearDead){
-                        // 死亡：跪地哭泣（壓扁 + 哭臉 + 微抖）
-                        float deadT2=(float)(bnow-g_bearDeadT);
-                        float sink=std::min(deadT2*2.f,1.f); // 0→1 下沉
-                        float tremble=sinf(deadT2*18.f)*0.015f*sc*(1.f-sink*0.5f); // 顫抖
-                        buildDonChan(c0,c1,c2,c3,c4,
-                            bearX+tremble, bearY-sink*sc*0.25f, sc*0.85f,
-                            0.f, false, 0.55f*sink, 0.f, -1); // 朝左45度跪著
-                    } else {
-                        // 被打後 0.8 秒哭臉，正常笑臉
-                        bool marioHappy2=(bnow-g_bearHitT>0.8);
-                        float actionSquash=squashT;
-                        float actionX=bearX;
-                        float actionY=bearY;
-
-                        // 揮刀動作：身體前傾 + 微蹲
-                        if(slashT3>0.f && slashT3<1.f){
-                            float swingT=sinf(slashT3*3.14159f); // 0→1→0
-                            actionSquash+=swingT*0.18f;  // 微壓扁（蹲下揮刀）
-                            actionX+=g_bearFaceDir*sc*0.06f*swingT; // 身體向前傾
-                            actionY-=sc*0.03f*swingT;    // 微下沉
+                    // ── 渲染拉拉熊（2D sprite billboard）──────────
+                    {
+                        float bsx=bearX, bsy=bearY;
+                        float bsW=sc*1.6f, bsH=sc*1.8f;
+                        // 揮刀/被打動作偏移
+                        if(!g_bearDead){
+                            float se2=slashT3;
+                            if(se2>0.f&&se2<1.f) bsx+=g_bearFaceDir*sc*0.06f*sinf(se2*3.14159f);
+                            float he2=(float)(bnow-g_bearHitT);
+                            if(he2>=0.f&&he2<0.5f){
+                                bsx-=g_bearFaceDir*sc*0.08f*sinf(he2/0.5f*3.14159f);
+                                bsy+=sc*0.05f*sinf(he2/0.5f*3.14159f);}
+                        } else {
+                            float deadT2=(float)(bnow-g_bearDeadT);
+                            float sink=std::min(deadT2*2.f,1.f);
+                            bsy-=sink*sc*0.25f; bsH*=0.7f;
+                            bsx+=sinf(deadT2*18.f)*0.015f*sc;
                         }
-                        // 被打動作：身體後仰 + 彈跳
-                        float hitElapsed=(float)(bnow-g_bearHitT);
-                        if(hitElapsed>=0.f && hitElapsed<0.5f){
-                            float hitT=hitElapsed/0.5f;
-                            float recoil=sinf(hitT*3.14159f); // 0→1→0
-                            actionSquash-=recoil*0.20f; // 拉長（後仰）
-                            actionX-=g_bearFaceDir*sc*0.08f*recoil; // 後退
-                            actionY+=sc*0.05f*recoil; // 微跳起
-                        }
-
-                        buildDonChan(c0,c1,c2,c3,c4,actionX,actionY,sc,jumpT,marioHappy2,actionSquash,slashT3,g_bearFaceDir);
+                        glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                        drawSprite(g_texBear,bsx,bsy,bsW,bsH,MVP,view);
+                        // 鐮刀 sprite
+                        if(!g_bearDead && slashT3>0.f && slashT3<1.f)
+                            drawSprite(g_texScythe,bsx+g_bearFaceDir*sc*0.8f,bsy+sc*0.3f,sc*1.2f,sc*1.6f,MVP,view);
+                        glDisable(GL_BLEND);
                     }
-                    mChr0.upload(c0);mChr1.upload(c1);mChr2.upload(c2);mChr3.upload(c3);mChr4.upload(c4);
-                    uV3(g_pLit,"uCol",{.74f,.54f,.34f});mChr0.draw();
-                    uV3(g_pLit,"uCol",{.91f,.82f,.66f});mChr1.draw();
-                    uV3(g_pLit,"uCol",{.97f,.94f,.88f});mChr2.draw();
-                    uV3(g_pLit,"uCol",{.16f,.10f,.07f});mChr3.draw();
-                    if(!g_bearDead) uV3(g_pLit,"uCol",{.82f,.84f,.88f});mChr4.draw();
                 } else {
-                    // ── 非遊戲模式：正常拉拉熊 ────────────────────
-                    bool marioHappy=(bd[g_bearIdx].c >= bd[g_bearIdx].o);
-                    std::vector<float>c0,c1,c2,c3,c4;
-                    buildDonChan(c0,c1,c2,c3,c4,bearX,bearY,sc,jumpT,marioHappy,squashT,0.f);
-                    mChr0.upload(c0);mChr1.upload(c1);mChr2.upload(c2);mChr3.upload(c3);
-                    uV3(g_pLit,"uCol",{.74f,.54f,.34f});mChr0.draw();
-                    uV3(g_pLit,"uCol",{.91f,.82f,.66f});mChr1.draw();
-                    uV3(g_pLit,"uCol",{.97f,.94f,.88f});mChr2.draw();
-                    uV3(g_pLit,"uCol",{.16f,.10f,.07f});mChr3.draw();
+                    // ── 非遊戲模式：拉拉熊 sprite ───────────────
+                    glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+                    drawSprite(g_texBear,bearX,bearY,sc*1.6f,sc*1.8f,MVP,view);
+                    glDisable(GL_BLEND);
                 }
 
                 // 投影到螢幕（報價泡泡用）
