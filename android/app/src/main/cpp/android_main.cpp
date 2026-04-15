@@ -386,6 +386,218 @@ static void drawFrame() {
             uV3(g_pLit, "uCol", {.16f, .10f, .07f}); mChr3.draw();
             uV3(g_pLit, "uCol", {.82f, .84f, .88f}); mChr4.draw();
 
+            // ── 怪物邏輯 ─────────────────────────────────
+            if (g_gameMode && !g_bearDead) {
+                float diffMult = std::min(3.f, 1.f + g_killCount * 0.01f);
+
+                // 韭菜生成
+                int maxLeeks = 10 + rand() % 11;
+                float spawnCD = std::max(0.5f, 1.8f - g_killCount * 0.04f);
+                int aliveCount = 0;
+                for (auto& a : g_ants) if (a.alive) aliveCount++;
+                if (aliveCount < maxLeeks && bnow - g_lastAntSpawn > spawnCD) {
+                    int toSpawn = maxLeeks - aliveCount;
+                    for (int si = 0; si < toSpawn; si++) {
+                        int ri = rand() % bn;
+                        AntMonster am;
+                        am.x = ri * g_sp; am.alive = true; am.facingLeft = (am.x > bearX);
+                        am.spawnT = bnow; am.deathT = -1.0; am.hp = 100.f; am.lastHitT = -9.0;
+                        g_ants.push_back(am);
+                    }
+                    g_lastAntSpawn = bnow;
+                }
+                // 韭菜移動
+                float antSpeed = g_sp * 1.0f * diffMult;
+                for (auto& a : g_ants) {
+                    if (!a.alive) continue;
+                    float dir = (bearX > a.x) ? 1.f : -1.f;
+                    a.x += dir * antSpeed * (float)bdt;
+                    a.facingLeft = (dir < 0.f);
+                }
+                // 韭菜攻擊熊
+                for (auto& a : g_ants) {
+                    if (!a.alive) continue;
+                    if (std::fabs(a.x - bearX) < g_sp * 0.8f && (bnow - g_bearHitT) > 0.8) {
+                        int dmg = 5 + rand() % 6;
+                        g_bearHP -= dmg; g_bearHitT = bnow; sfxBearHit();
+                        if (g_bearHP <= 0.f) { g_bearHP = 0.f; if (!g_bearDead) { g_bearDead = true; g_bearDeadT = bnow; } }
+                        break;
+                    }
+                }
+                // 鐮刀打韭菜
+                if (slashT3 > 0.28f && slashT3 < 0.72f) {
+                    float hitRange = g_sp * 10.0f;
+                    for (auto& a : g_ants) {
+                        if (!a.alive) continue;
+                        if (std::fabs(a.x - bearX) < hitRange && (bnow - a.lastHitT) > 0.35) {
+                            int dmg = 60 + rand() % 31;
+                            a.hp -= dmg; addDmgFloat(a.x, toW(bd[glm::clamp((int)std::round(a.x / g_sp), 0, bn - 1)].h) + sc * 1.0f, dmg, dmg > 80);
+                            a.lastHitT = bnow;
+                            if (a.hp <= 0.f) { a.alive = false; a.deathT = bnow; g_killCount++; g_bearMP = std::min(500.f, g_bearMP + 10.f); sfxKill(); }
+                            else sfxHit();
+                        }
+                    }
+                }
+                // 清除韭菜
+                g_ants.erase(std::remove_if(g_ants.begin(), g_ants.end(),
+                    [&](const AntMonster& a) { return !a.alive && (bnow - a.deathT) > 0.8; }), g_ants.end());
+
+                // 渲染韭菜
+                std::vector<float> lkG, lkW, lkD;
+                for (auto& a : g_ants) {
+                    if (!a.alive) continue;
+                    int bi = glm::clamp((int)std::round(a.x / g_sp), 0, bn - 1);
+                    float leekY = toW(bd[bi].h) + sc * 0.02f;
+                    buildLeek(lkG, lkW, lkD, a.x, leekY, sc, a.spawnT, 1.f, true);
+                }
+                mLeekG.upload(lkG); mLeekW.upload(lkW); mLeekD.upload(lkD);
+                glUseProgram(g_pLit); uM4(g_pLit, "uMVP", MVP); uM4(g_pLit, "uMV", MV); uM3(g_pLit, "uNM", NM); uV3(g_pLit, "uLit", litV);
+                uV3(g_pLit, "uCol", {.22f, .62f, .18f}); mLeekG.draw();
+                uV3(g_pLit, "uCol", {.92f, .90f, .84f}); mLeekW.draw();
+                uV3(g_pLit, "uCol", {.12f, .10f, .08f}); mLeekD.draw();
+
+                // 龍蝦生成
+                int lobCount = 0;
+                for (auto& lb : g_lobs) if (lb.alive) lobCount++;
+                if (lobCount < 3 && bnow - g_lastLobSpawn > 3.5) {
+                    Lobster lb;
+                    lb.x = (rand() % bn) * g_sp;
+                    int lbi = rand() % bn;
+                    lb.y = toW(bd[lbi].h) + sc * (0.8f + 0.6f * (rand() % 100) / 100.f);
+                    lb.alive = true; lb.facingLeft = (rand() % 2 == 0);
+                    lb.spawnT = bnow; lb.deathT = -1.0; lb.hp = 300.f; lb.lastHitT = -9.0;
+                    lb.flySpeed = g_sp * 3.0f * diffMult;
+                    lb.flyAng = (rand() % 628) / 100.f;
+                    g_lobs.push_back(lb);
+                    g_lastLobSpawn = bnow;
+                }
+                // 龍蝦移動 + 丟螯
+                for (auto& lb : g_lobs) {
+                    if (!lb.alive) continue;
+                    if (rand() % 60 == 0) {
+                        float dx = bearX - lb.x, dy = (bearY + sc * 0.5f) - lb.y;
+                        lb.flyAng = atan2f(dy, dx);
+                    }
+                    lb.x += cosf(lb.flyAng) * lb.flySpeed * (float)bdt;
+                    lb.y += sinf(lb.flyAng) * lb.flySpeed * (float)bdt * 0.5f;
+                    int lbi3 = glm::clamp((int)std::round(lb.x / g_sp), 0, bn - 1);
+                    float minFlyY = toW(bd[lbi3].h) + sc * 0.5f;
+                    lb.y = glm::clamp(lb.y, minFlyY, WORLD_HI + sc * 2.f);
+                    lb.x = glm::clamp(lb.x, 0.f, (bn - 1) * g_sp);
+                    // 丟螯
+                    if (bnow - lb.lastHitT > 2.0) {
+                        lb.lastHitT = bnow;
+                        float dx = bearX - lb.x, dy = (bearY + sc * 0.5f) - lb.y;
+                        float dist = sqrtf(dx * dx + dy * dy);
+                        if (dist > 0.1f) {
+                            float spd = g_sp * 40.f;
+                            ClawProj cp;
+                            cp.x = lb.x; cp.y = lb.y; cp.ox = lb.x; cp.oy = lb.y;
+                            cp.tx = bearX; cp.ty = bearY + sc * 0.5f;
+                            cp.vx = dx / dist * spd; cp.vy = dy / dist * spd;
+                            cp.spawnT = bnow; cp.alive = true; cp.returning = false;
+                            g_claws.push_back(cp);
+                        }
+                    }
+                }
+                // 鐮刀打龍蝦
+                if (slashT3 > 0.28f && slashT3 < 0.72f) {
+                    float hitR = g_sp * 10.0f;
+                    for (auto& lb : g_lobs) {
+                        if (!lb.alive) continue;
+                        float dx3 = lb.x - bearX, dy3 = lb.y - (bearY + sc * 0.5f);
+                        if (sqrtf(dx3 * dx3 + dy3 * dy3) < hitR && (bnow - lb.lastHitT) > 0.35) {
+                            int dmg = 60 + rand() % 31;
+                            lb.hp -= dmg; addDmgFloat(lb.x, lb.y + sc * 0.5f, dmg, dmg > 80);
+                            lb.lastHitT = bnow;
+                            if (lb.hp <= 0.f) { lb.alive = false; lb.deathT = bnow; g_killCount++; g_bearMP = std::min(500.f, g_bearMP + 10.f); sfxKill(); }
+                        }
+                    }
+                }
+                // 螯投射物
+                for (auto& cp : g_claws) {
+                    if (!cp.alive) continue;
+                    float elapsed = (float)(bnow - cp.spawnT);
+                    if (!cp.returning) {
+                        cp.x += cp.vx * (float)bdt; cp.y += cp.vy * (float)bdt;
+                        float dx8 = cp.x - cp.tx, dy8 = cp.y - cp.ty;
+                        if (sqrtf(dx8 * dx8 + dy8 * dy8) < g_sp * 1.5f || elapsed > 1.2f) cp.returning = true;
+                    } else {
+                        float dx9 = cp.ox - cp.x, dy9 = cp.oy - cp.y;
+                        float d9 = sqrtf(dx9 * dx9 + dy9 * dy9);
+                        if (d9 > g_sp * 0.5f) { cp.x += dx9 / d9 * g_sp * 35.f * (float)bdt; cp.y += dy9 / d9 * g_sp * 35.f * (float)bdt; }
+                        else cp.alive = false;
+                    }
+                    float cdx = cp.x - bearX, cdy = cp.y - (bearY + sc * 0.5f);
+                    if (sqrtf(cdx * cdx + cdy * cdy) < g_sp * 0.8f && (bnow - g_bearHitT) > 0.3) {
+                        g_bearHP -= (5 + rand() % 11); g_bearHitT = bnow; sfxBearHit();
+                        if (g_bearHP <= 0.f) { g_bearHP = 0.f; if (!g_bearDead) { g_bearDead = true; g_bearDeadT = bnow; } }
+                    }
+                    if (elapsed > 5.f) cp.alive = false;
+                }
+                g_claws.erase(std::remove_if(g_claws.begin(), g_claws.end(), [](const ClawProj& c) { return !c.alive; }), g_claws.end());
+                g_lobs.erase(std::remove_if(g_lobs.begin(), g_lobs.end(), [&](const Lobster& lb) { return !lb.alive && (bnow - lb.deathT) > 0.8; }), g_lobs.end());
+
+                // 渲染龍蝦
+                std::vector<float> lobR, lobD;
+                for (auto& lb : g_lobs) {
+                    if (!lb.alive) continue;
+                    float lscl = 1.f;
+                    buildLobster(lobR, lobD, lb.x, lb.y, sc, lb.facingLeft, lb.spawnT, lscl);
+                }
+                mLobR.upload(lobR); mLobD.upload(lobD);
+                uV3(g_pLit, "uCol", {.85f, .18f, .12f}); mLobR.draw();
+                uV3(g_pLit, "uCol", {.10f, .08f, .06f}); mLobD.draw();
+
+                // 紙箱生成
+                int boxAlive = 0;
+                for (auto& bm : g_boxes) if (bm.alive) boxAlive++;
+                if (boxAlive < 4 && bnow - g_lastBoxSpawn > 3.0) {
+                    BoxMon bm;
+                    bm.x = (rand() % bn) * g_sp;
+                    bm.alive = true; bm.spawnT = bnow; bm.deathT = -1.0; bm.hp = 200.f; bm.lastHitT = -9.0;
+                    g_boxes.push_back(bm);
+                    g_lastBoxSpawn = bnow;
+                }
+                // 紙箱移動+攻擊
+                float boxSpd = g_sp * 2.0f * diffMult;
+                for (auto& bm : g_boxes) {
+                    if (!bm.alive) continue;
+                    float dir2 = (bearX > bm.x) ? 1.f : -1.f;
+                    bm.x += dir2 * boxSpd * (float)bdt;
+                    if (std::fabs(bm.x - bearX) < g_sp * 0.8f && (bnow - g_bearHitT) > 0.8) {
+                        g_bearHP -= (8 + rand() % 8); g_bearHitT = bnow; sfxBearHit();
+                        if (g_bearHP <= 0.f) { g_bearHP = 0.f; if (!g_bearDead) { g_bearDead = true; g_bearDeadT = bnow; } }
+                    }
+                }
+                // 鐮刀打紙箱
+                if (slashT3 > 0.28f && slashT3 < 0.72f) {
+                    for (auto& bm : g_boxes) {
+                        if (!bm.alive) continue;
+                        if (std::fabs(bm.x - bearX) < g_sp * 10.f && (bnow - bm.lastHitT) > 0.35) {
+                            int dmg = 60 + rand() % 31;
+                            bm.hp -= dmg; addDmgFloat(bm.x, toW(bd[glm::clamp((int)std::round(bm.x / g_sp), 0, bn - 1)].h) + sc * 1.2f, dmg, dmg > 80);
+                            bm.lastHitT = bnow;
+                            if (bm.hp <= 0.f) { bm.alive = false; bm.deathT = bnow; g_killCount++; g_bearMP = std::min(500.f, g_bearMP + 10.f); sfxKill(); }
+                            else sfxHit();
+                        }
+                    }
+                }
+                g_boxes.erase(std::remove_if(g_boxes.begin(), g_boxes.end(), [&](const BoxMon& bm) { return !bm.alive && (bnow - bm.deathT) > 0.8; }), g_boxes.end());
+
+                // 渲染紙箱
+                std::vector<float> boxB, boxDk;
+                for (auto& bm : g_boxes) {
+                    if (!bm.alive) continue;
+                    int bi5 = glm::clamp((int)std::round(bm.x / g_sp), 0, bn - 1);
+                    float by5 = toW(bd[bi5].h) + sc * 0.02f;
+                    buildBoxMonster(boxB, boxDk, bm.x, by5, sc, bm.spawnT, 1.f);
+                }
+                mBoxB.upload(boxB); mBoxD.upload(boxDk);
+                uV3(g_pLit, "uCol", {.72f, .58f, .38f}); mBoxB.draw();
+                uV3(g_pLit, "uCol", {.18f, .14f, .10f}); mBoxD.draw();
+            } // end game mode monster logic
+
             // Camera follow bear
             float midX = bearX;
             g_cam.tgt = {midX, (WORLD_HI + WORLD_LO) * 0.5f, 0.f};
@@ -432,6 +644,25 @@ static void drawFrame() {
     char killBuf[24]; snprintf(killBuf, sizeof(killBuf), "Kills: %d", g_killCount);
     dl->AddText(ImVec2(hudX, mpY + barH + 6), IM_COL32(200, 210, 230, 220), killBuf);
 
+    // 死亡畫面
+    if (g_bearDead) {
+        float deadAlpha = std::min(1.f, (float)(glfwGetTime() - g_bearDeadT) / 0.5f);
+        dl->AddRectFilled(ImVec2(0, 0), ImVec2((float)fw, (float)fh), IM_COL32(0, 0, 0, (int)(140 * deadAlpha)));
+        ImFont* font = ImGui::GetFont();
+        float fs2 = ImGui::GetFontSize() * 3.f;
+        const char* rip = "R.I.P.";
+        ImVec2 rsz = font->CalcTextSizeA(fs2, FLT_MAX, 0.f, rip);
+        dl->AddText(font, fs2, ImVec2((fw - rsz.x) * 0.5f, fh * 0.35f), IM_COL32(180, 180, 180, (int)(255 * deadAlpha)), rip);
+        // 重新開始按鈕
+        float rbW = 200, rbH = 50;
+        float rbX = (fw - rbW) * 0.5f, rbY = fh * 0.55f;
+        dl->AddRectFilled(ImVec2(rbX, rbY), ImVec2(rbX + rbW, rbY + rbH), IM_COL32(60, 120, 200, (int)(200 * deadAlpha)), 8.f);
+        const char* retry = "Restart";
+        ImVec2 rtsz = ImGui::CalcTextSize(retry);
+        dl->AddText(ImVec2(rbX + (rbW - rtsz.x) * 0.5f, rbY + (rbH - rtsz.y) * 0.5f),
+                    IM_COL32(255, 255, 255, (int)(255 * deadAlpha)), retry);
+    }
+
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -453,6 +684,12 @@ static int32_t handleInput(struct android_app* app, AInputEvent* event) {
         float ny = y / g_egl.height;
 
         if (action == AMOTION_EVENT_ACTION_DOWN) {
+            // 死亡重生按鈕
+            if (g_bearDead && ny > 0.5f && ny < 0.65f && nx > 0.35f && nx < 0.65f) {
+                g_bearDead = false; g_bearHP = 100.f; g_bearMP = 500.f;
+                g_ants.clear(); g_lobs.clear(); g_boxes.clear(); g_claws.clear(); g_killCount = 0;
+                g_lastAntSpawn = g_lastLobSpawn = g_lastBoxSpawn = -99.0;
+            }
             for (int i = 0; i < NUM_BTNS; i++) {
                 auto& b = g_btns[i];
                 if (nx >= b.x && nx <= b.x + b.w && ny >= b.y && ny <= b.y + b.h)
